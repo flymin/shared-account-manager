@@ -1,0 +1,2 @@
+Optional corporate CA bundle: place PEM certificates in build-ca.pem beside this file.
+This optional file is ignored by Git and copied only into the frontend build stage.

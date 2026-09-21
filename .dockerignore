@@ -1,0 +1,13 @@
+.git
+.local
+.env
+.env.*
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/dist
+**/test-results
+**/playwright-report
+**/*.swp
+**/*.swo
+**/*~

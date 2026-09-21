@@ -1,0 +1,98 @@
+name: account-manager
+x-app: &app
+  image: account-manager-api:local
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile.api
+    network: ${BUILD_NETWORK:-default}
+    args:
+      IMAGE_PREFIX: ${IMAGE_PREFIX:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
+  environment:
+    DB_HOST: db
+    DB_NAME: account_manager
+    DB_PASSWORD_FILE: /run/secrets/db_password
+    CREDENTIAL_KEY_FILE: /run/secrets/credential_key
+    PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
+    MAIL_CODE_SENDER: ${MAIL_CODE_SENDER:-}
+    MAIL_CODE_SUBJECT_KEYWORD: ${MAIL_CODE_SUBJECT_KEYWORD:-}
+  secrets:
+    - db_password
+    - credential_key
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+services:
+  db:
+    image: ${IMAGE_PREFIX:-}postgres:18
+    environment:
+      POSTGRES_DB: account_manager
+      POSTGRES_USER: account_manager
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [db-data:/var/lib/postgresql]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U account_manager -d account_manager]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  init:
+    <<: *app
+    environment:
+      DB_HOST: db
+      DB_NAME: account_manager
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      CREDENTIAL_KEY_FILE: /run/secrets/credential_key
+      BOOTSTRAP_PASSWORD_FILE: /run/secrets/bootstrap_password
+    secrets: [db_password, credential_key, bootstrap_password]
+    command: [sh, -c, 'alembic upgrade head && python -m app.cli bootstrap']
+    depends_on:
+      db: {condition: service_healthy}
+    restart: 'no'
+  api:
+    <<: *app
+    depends_on:
+      init: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:8000/api/ready", timeout=3)']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+  worker:
+    <<: *app
+    command: [python, -m, app.worker]
+    depends_on:
+      init: {condition: service_completed_successfully}
+    restart: unless-stopped
+  web:
+    image: account-manager-web:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+      network: ${BUILD_NETWORK:-default}
+      args:
+        IMAGE_PREFIX: ${IMAGE_PREFIX:-}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+    ports: ['${BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-8080}:80']
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1/api/ready']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+secrets:
+  db_password:
+    file: ../.local/secrets/db_password
+  credential_key:
+    file: ../.local/secrets/credential_key
+  bootstrap_password:
+    file: ../.local/secrets/bootstrap_password
+volumes:
+  db-data:
