@@ -544,7 +544,7 @@ export function Pool({
             allowClear
           />
           <Select
-            aria-label="筛选档位"
+            aria-label="筛选类型"
             value={tier}
             onChange={(value) => {
               setTier(value);

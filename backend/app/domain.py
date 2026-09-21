@@ -39,7 +39,7 @@ def validate_tier(db, identity, current=None):
         item["id"] == identity and item["enabled"]
         for item in settings(db).account_options["tiers"]
     ):
-        fail("请选择当前启用的账号档位", 422)
+        fail("请选择当前启用的账号类型", 422)
 
 
 def validate_categories(db, categories):
@@ -56,7 +56,7 @@ def validate_options_update(db, options):
     # Preserve references, including soft-deleted accounts and inactive anomalies.
     tiers = {item["id"] for item in options["tiers"]}
     if db.scalar(select(Account.id).where(Account.tier.not_in(tiers)).limit(1)):
-        fail("不能删除已被账号使用的档位，请改为停用", 422)
+        fail("不能删除已被账号使用的类型，请改为停用", 422)
     categories = {item["id"] for item in options["anomaly_categories"]}
     for used in db.scalars(select(Account.health_categories).distinct()):
         if not set(used) <= categories:

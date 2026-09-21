@@ -30,7 +30,7 @@ export const useAccountOptions = () => useContext(OptionsContext);
 export function useTierFilters() {
   const { data } = useAccountOptions();
   return [
-    { value: "all", label: "全部档位" },
+    { value: "all", label: "全部类型" },
     ...(data?.tiers || []).map((item) => ({
       value: item.id,
       label: item.name + (item.enabled ? "" : "（已停用）"),
@@ -39,7 +39,7 @@ export function useTierFilters() {
 }
 
 export function TierField({
-  label = "账号档位",
+  label = "账号类型",
   current,
   useDefault = false,
 }: {
@@ -64,17 +64,17 @@ export function TierField({
       label={label}
       extra={error}
       rules={[
-        { required: true, message: "请选择账号档位" },
+        { required: true, message: "请选择账号类型" },
         {
           validator: async (_, value) => {
-            if (!data) throw new Error("账号档位尚未加载，请稍后重试");
+            if (!data) throw new Error("账号类型尚未加载，请稍后重试");
             if (
               !data.tiers.some(
                 (item) =>
                   item.id === value && (item.enabled || item.id === current),
               )
             )
-              throw new Error("请选择当前启用的账号档位");
+              throw new Error("请选择当前启用的账号类型");
           },
         },
       ]}
@@ -133,7 +133,7 @@ export function AnomalyField() {
 export function AccountOptionsEditor() {
   return (
     <>
-      <OptionsList kind="tiers" title="账号档位" />
+      <OptionsList kind="tiers" title="账号类型" />
       <OptionsList kind="anomaly_categories" title="异常类别" />
     </>
   );
@@ -155,7 +155,7 @@ function OptionsList({
       <p className="muted">
         {anomaly
           ? `恢复间隔留空沿用全局 ${defaultHours ?? "—"} 小时；多选取最长间隔，只有自由文本时沿用全局值。`
-          : "至少保留一个启用档位。改名会同步更新账号显示，停用后不能用于新登记或转入。"}
+          : "至少保留一个启用类型。改名会同步更新账号显示，停用后不能用于新登记或转入。"}
       </p>
       <Form.List
         name={["account_options", kind]}
@@ -167,7 +167,7 @@ function OptionsList({
                 !anomaly &&
                 !items.some((item: { enabled: boolean }) => item.enabled)
               )
-                throw new Error("至少需要一个启用的账号档位");
+                throw new Error("至少需要一个启用的账号类型");
               const names = items.map((item: { name: string }) =>
                 item.name?.trim().toLocaleLowerCase(),
               );

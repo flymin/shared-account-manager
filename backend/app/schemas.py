@@ -84,7 +84,7 @@ class AccountOptions(Input):
     @classmethod
     def enabled_tier(cls, values):
         if not any(v.enabled for v in values):
-            raise ValueError("至少需要一个启用的账号档位")
+            raise ValueError("至少需要一个启用的账号类型")
         return values
 
 

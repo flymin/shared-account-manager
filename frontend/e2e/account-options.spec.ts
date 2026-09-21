@@ -157,17 +157,17 @@ test("在线维护档位和异常间隔，导入与编辑使用已保存的配�
   );
   const state = await fixture(page);
   await nav(page, "系统设置");
-  const tiers = page.getByRole("region", { name: "账号档位配置" });
+  const tiers = page.getByRole("region", { name: "账号类型配置" });
   const categories = page.getByRole("region", { name: "异常类别配置" });
   await tiers
-    .getByLabel("账号档位名称", { exact: true })
+    .getByLabel("账号类型名称", { exact: true })
     .first()
     .fill("通用档位");
   await tiers
-    .getByRole("button", { name: "新增账号档位", exact: true })
+    .getByRole("button", { name: "新增账号类型", exact: true })
     .click();
   await tiers
-    .getByLabel("账号档位名称", { exact: true })
+    .getByLabel("账号类型名称", { exact: true })
     .last()
     .fill("扩展档位");
   await categories
@@ -219,7 +219,7 @@ test("在线维护档位和异常间隔，导入与编辑使用已保存的配�
   await page
     .getByLabel("账号内容", { exact: true })
     .fill("new@example.test----fictional----mailbox");
-  await page.getByLabel("本批账号档位", { exact: true }).press("ArrowDown");
+  await page.getByLabel("本批账号类型", { exact: true }).press("ArrowDown");
   await expect(
     page
       .locator(".ant-select-dropdown:visible")
@@ -235,7 +235,7 @@ test("在线维护档位和异常间隔，导入与编辑使用已保存的配�
   await expect.poll(() => state.imports.length).toBe(1);
   expect(state.imports[0].tier).toBe(customId);
   await page.getByRole("button", { name: "编辑", exact: true }).click();
-  await page.getByLabel("账号档位", { exact: true }).press("ArrowDown");
+  await page.getByLabel("账号类型", { exact: true }).press("ArrowDown");
   await page
     .locator(".ant-select-item-option-content")
     .getByText("扩展档位", { exact: true })
@@ -294,7 +294,7 @@ test("普通用户可使用动态档位筛选，不能进入配置页", async ({
   await expect(navArea.getByText("系统设置", { exact: true })).toHaveCount(0);
   await page
     .locator(".filter-bar")
-    .getByText("全部档位", { exact: true })
+    .getByText("全部类型", { exact: true })
     .click();
   await page
     .locator(".ant-select-item-option-content")

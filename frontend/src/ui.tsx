@@ -300,7 +300,7 @@ const eventNames: Record<string, string> = {
   email_code_started: "获取邮箱验证码",
 };
 const fieldNames: Record<string, string> = {
-  tier: "档位",
+  tier: "类型",
   capacity: "人数上限",
   expires_at: "过期时间",
   quota_reset_interval_days: "额度重置间隔",
@@ -358,7 +358,7 @@ export function eventText(e: Audit) {
     );
   if (d.account_options)
     parts.push(
-      `档位 ${d.account_options.tiers.length} 类 · 异常 ${d.account_options.anomaly_categories.length} 类`,
+      `类型 ${d.account_options.tiers.length} 类 · 异常 ${d.account_options.anomaly_categories.length} 类`,
     );
   return parts.join(" · ");
 }

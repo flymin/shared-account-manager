@@ -40,11 +40,11 @@ import {
 } from "./passwordPolicy";
 const { Header, Sider, Content } = Layout;
 const names: Record<string, [string, string]> = {
-  pool: ["账号大厅", "查看共享账号状态，选择适合的档位开始使用。"],
+  pool: ["账号大厅", "查看共享账号状态，选择适合的类型开始使用。"],
   mine: ["我的领用", "领用即使用。及时反馈额度，完成后主动归还。"],
   history: ["领用历史", "每次领用与归还，都有迹可循。"],
   dashboard: ["管理概览", "账号资源、使用情况与待处理事项，一目了然。"],
-  accounts: ["账号管理", "维护档位、有效期与可见范围。"],
+  accounts: ["账号管理", "维护类型、有效期与可见范围。"],
   people: ["用户与用户组", "让合适的人访问合适的账号。"],
   settings: ["系统设置", "统一配置领用上限与异常恢复规则。"],
   audit: ["操作审计", "查看账号、用户与系统的变更记录。"],

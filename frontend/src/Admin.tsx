@@ -160,7 +160,7 @@ function ImportDialog({
           </Form.Item>
           <Row gutter={16}>
             <Col xs={24} md={12}>
-              <TierField label="本批账号档位" useDefault />
+              <TierField label="本批账号类型" useDefault />
             </Col>
             <Col xs={24} md={12}>
               <Form.Item name="capacity" label="人数上限（留空沿用全局）">
