@@ -5,12 +5,15 @@ from .domain import reconcile
 from .config import cipher
 from .email_worker import EmailWorker
 from .plugins.tools import tool_catalog
+from .login_limits import cleanup as cleanup_login_attempts
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("account-manager.worker")
 
 
 def tick():
+    with Session.begin() as db:
+        cleanup_login_attempts(db)
     with Session.begin() as db:
         write_lock(db)
         reconcile(db)

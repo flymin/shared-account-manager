@@ -30,6 +30,20 @@ def parse_public_origin(value: str) -> str:
 PUBLIC_ORIGIN = parse_public_origin(os.getenv("PUBLIC_ORIGIN", ""))
 
 
+def bounded_int(name: str, default: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+        if 1 <= value <= maximum:
+            return value
+    except ValueError:
+        pass
+    raise ValueError(f"{name} must be an integer between 1 and {maximum}")
+
+
+LOGIN_RATE_PER_MINUTE = bounded_int("LOGIN_RATE_PER_MINUTE", 30, 120)
+LOGIN_BURST = bounded_int("LOGIN_BURST", 10, 20)
+
+
 def secret(name: str) -> str:
     path = os.environ.get(f"{name}_FILE")
     if not path:

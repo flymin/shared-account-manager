@@ -621,9 +621,14 @@ def test_validation_redacts_submitted_secrets(admin):
     assert r.status_code == 422 and raw not in r.text
 
 
-def test_login_failures_persist_and_rate_limit(admin):
+def test_login_failures_persist_and_rate_limit(admin, monkeypatch):
+    from app import auth
+
+    stamp = now()
+    monkeypatch.setattr(auth, "now", lambda: stamp)
     c = TestClient(app)
     for _ in range(10):
+        stamp += timedelta(seconds=2)
         assert (
             c.post(
                 P + "/auth/login",

@@ -194,7 +194,16 @@ class LoginAttempt(Base):
     __tablename__ = "login_attempts"
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
-    since: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    since: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, index=True
+    )
+
+
+class LoginBudget(Base):
+    __tablename__ = "login_budget"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    next_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (CheckConstraint("id = 1", name="login_budget_singleton"),)
 
 
 class TwoFactor(Base):

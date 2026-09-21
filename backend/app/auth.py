@@ -5,7 +5,7 @@ from fastapi import Depends, HTTPException, Request, Response
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError
 from sqlalchemy import select, delete
-from . import config
+from . import config, login_limits
 from .db import get_db, write_lock
 from .models import User, LoginSession, LoginAttempt, Settings, now
 
@@ -69,28 +69,30 @@ def admin(user=Depends(authenticate)):
 
 
 def login(db, data, response: Response):
-    write_lock(db)
+    if not login_limits.try_lock(db):
+        return login_limits.reject(response, 1)
     stamp = now()
     key = digest(data.username.lower())
-    attempt = db.get(LoginAttempt, key)
-    if (
-        attempt
-        and attempt.since > stamp - timedelta(minutes=15)
-        and attempt.attempts >= 10
-    ):
-        return None, "登录失败次数过多，请 15 分钟后重试", 429
+    attempt, retry = login_limits.admit(db, key, stamp)
+    if retry is not None:
+        return login_limits.reject(response, retry)
     user = db.scalar(
         select(User).where(
             User.username == data.username.lower(), User.deleted.is_(False)
         )
     )
-    valid = check_password(user.password_hash if user else DUMMY_HASH, data.password)
+    encoded = user.password_hash if user else DUMMY_HASH
+    valid = check_password(encoded, data.password)
+    if valid and user:
+        # Password calculation must not hold up claims, returns or maintenance.
+        # Recheck after locking: a reset/deletion can commit during verification.
+        write_lock(db)
+        db.refresh(user)
+        valid = not user.deleted and user.password_hash == encoded
     if not valid or not user:
         if not attempt:
             attempt = LoginAttempt(key=key, attempts=0, since=stamp)
             db.add(attempt)
-        if attempt.since <= stamp - timedelta(minutes=15):
-            attempt.since, attempt.attempts = stamp, 0
         attempt.attempts += 1
         return None, "用户名或密码错误", 401
     if attempt:

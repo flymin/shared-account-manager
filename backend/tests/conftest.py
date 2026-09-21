@@ -39,11 +39,15 @@ def register_tool(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def database(monkeypatch):
+    from app import config
+
     assert engine.url.database.endswith("_test"), (
         "Tests require an isolated *_test database"
     )
     monkeypatch.setenv("MAIL_CODE_SENDER", "noreply@login.example.test")
     monkeypatch.setenv("MAIL_CODE_SUBJECT_KEYWORD", "ExampleService")
+    monkeypatch.setattr(config, "LOGIN_RATE_PER_MINUTE", 30)
+    monkeypatch.setattr(config, "LOGIN_BURST", 10)
     # Ignore deployment-specific tool catalogs in isolated tests.
     monkeypatch.delenv("MAIL_TOOLS_CONFIG_FILE", raising=False)
     tool_catalog.cache_clear()
