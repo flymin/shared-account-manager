@@ -10,7 +10,7 @@ from .config import cipher
 from .db import Session, write_lock
 from .models import Account, EmailCodeRun, now
 from .mail import MailError, find_candidate, valid_code
-from .plugins import configured_templates, get_mail_backend
+from .plugins import get_mail_tool
 from . import verification as v
 
 
@@ -66,7 +66,9 @@ def snapshot(run_id, token):
         account = db.get(Account, run.account_id)
         return dict(
             account_id=account.id,
+            mail_tool=run.mail_tool,
             mail_backend=run.mail_backend,
+            tool_config_hash=run.tool_config_hash,
             email=account.email,
             password=cipher()
             .decrypt(account.auth_password_encrypted.encode())
@@ -151,19 +153,18 @@ class EmailWorker:
             data = snapshot(run_id, token)
             if data is None:
                 return
-            templates = configured_templates()
-            if not templates:
+            tool = get_mail_tool(data["mail_tool"])
+            if tool is None:
+                raise MailError("tool_unavailable")
+            if tool.template is None or tool.config_hash != data["tool_config_hash"]:
                 raise MailError("configuration")
-            backend = get_mail_backend(data["mail_backend"])
-            if backend is None:
-                raise MailError("backend_unavailable")
-            identity = (data["mail_backend"], data["email"], data["password"])
+            identity = (tool.id, tool.config_hash, data["email"], data["password"])
             cached = self.clients.get(run_id)
             if cached and cached[0] != identity:
                 self.close_client(run_id)
                 cached = None
             if not cached:
-                client = (self.factory or backend.create)(
+                client = (self.factory or tool.backend.create)(
                     data["email"], data["password"]
                 )
                 self.clients[run_id] = (identity, client)
@@ -172,7 +173,11 @@ class EmailWorker:
             message_id = data["message_id"]
             if not message_id:
                 candidate = find_candidate(
-                    client, templates, data["since"], data["deadline"], data["excluded"]
+                    client,
+                    [tool.template],
+                    data["since"],
+                    data["deadline"],
+                    data["excluded"],
                 )
                 if candidate is None or not save_candidate(run_id, token, candidate):
                     complete(run_id, token)

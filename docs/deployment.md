@@ -34,8 +34,9 @@ curl --fail http://localhost:8080/api/ready
 | `BIND_ADDRESS` | `0.0.0.0` | Web 监听地址；同机反向代理通常使用 `127.0.0.1` |
 | `HTTP_PORT` | `8080` | Web 在宿主机的 HTTP 端口 |
 | `PUBLIC_ORIGIN` | 空 | 对外访问来源，如 `https://accounts.example.test`，不带路径 |
-| `MAIL_CODE_SENDER` | 空 | Template A 的完整发件人地址，精确匹配 |
-| `MAIL_CODE_SUBJECT_KEYWORD` | 空 | Template A 主题必须包含的固定关键词，不区分大小写 |
+| `MAIL_TOOLS_CONFIG_PATH` | 空，使用内置配置 | 自定义取码工具 TOML 文件，路径相对于 `deploy/` |
+| `MAIL_CODE_SENDER` | 空 | 六位数字验证码模板的完整发件人地址，精确匹配 |
+| `MAIL_CODE_SUBJECT_KEYWORD` | 空 | 六位数字验证码模板的主题必须包含的固定关键词，不区分大小写 |
 | `BUILD_NETWORK` | `default` | Docker 构建网络，必要时可设置为 `host` |
 | `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` | 当前环境 | 构建阶段使用的网络代理配置 |
 
@@ -69,14 +70,14 @@ IMAGE_PREFIX=registry.example.test/dockerhub-cache/
 
 邮箱等待时长在 Web 系统设置中调整，默认5分钟。仅支持邮箱密码登录；邮箱要求额外验证时，需要在邮箱服务中手动处理。账号 2FA 的二维码配置和使用权限见[登录验证指南](verification.md)。
 
-内置 Template A 需要同时配置 `MAIL_CODE_SENDER` 和 `MAIL_CODE_SUBJECT_KEYWORD`。例如下列虚构值，部署时替换为实际验证邮件的发件人和稳定的主题关键词：
+内置的六位数字验证码模板需要同时配置 `MAIL_CODE_SENDER` 和 `MAIL_CODE_SUBJECT_KEYWORD`。例如下列虚构值，部署时替换为实际验证邮件的发件人和稳定的主题关键词：
 
 ```dotenv
 MAIL_CODE_SENDER=noreply@login.example.test
 MAIL_CODE_SUBJECT_KEYWORD=ExampleService
 ```
 
-未配置或规则无效时，此模板不启用；没有可用模板时，取码请求会提示管理员配置，后台不会发起邮箱访问。匹配规则仅决定筛选哪些邮件，邮箱服务由账号的“邮箱后端”选择决定；该选项为空时自动取码关闭。实际匹配值只保存在部署环境的 `.env` 中。新增邮箱后端与模板见[插件开发指南](mail-plugins.md)，API 和 worker 必须使用相同的插件代码及配置。
+内置取码工具通过上述环境变量为模板提供参数。未配置或规则无效时，该工具不能自动取码，后台不会访问邮箱。账号选择的“邮箱取码工具”同时决定邮箱后端和模板；清空选择则关闭自动取码。自定义组合可写入私有 TOML，并在 `.env` 中设置 `MAIL_TOOLS_CONFIG_PATH=../.local/mail-tools.toml`；它会替换内置工具配置。配置方式见[工具与插件指南](mail-plugins.md)，API 和 worker 必须使用相同的插件代码及配置。
 
 ## HTTPS 与反向代理
 
@@ -116,7 +117,7 @@ python3 ops/backup.py
 
 从旧版本升级时，先补齐上述邮箱匹配配置。迁移会将已有账号 2FA 类型统一为 `service`，保留密文、配置版本和更新时间，并同步审计中的类型标识；邮箱 2FA 的历史配置继续保留但不启用。升级后刷新浏览器，外部 API 客户端应使用 `/two-factor/service` 和 `two_factor.service`。
 
-邮箱插件迁移会为现有账号和取码任务登记原内置后端，保留账号密码、领用及验证码数据。新账号可通过管理员界面关闭自动取码。降级至不支持邮箱后端选择的版本会丢失此选择，并取消未结束任务、清除短期验证码；应先备份，按需恢复数据。
+取码工具迁移保留已有账号的选择、密码和领用记录，并取消未绑定模板配置的旧取码任务及结果，用户可重新发起取码。外部 API 客户端需改用 `/mail-tools`、`mail_tool` 和 `mail_tool_name`。降级会关闭账号自动取码并取消任务，管理员需要重新选择后端；应先备份，按需恢复数据。
 
 停止服务可使用 `./ops/compose.sh stop`；删除容器但保留数据库卷可使用 `./ops/compose.sh down`。恢复运行使用 `./ops/compose.sh up -d --no-build --wait`。`down -v` 会删除数据卷，不能用于常规重启或更新。
 
@@ -127,6 +128,7 @@ python3 ops/backup.py
 | 账号、用户、授权、会话、历史、设置、加密的 2FA 配置与短期邮箱任务 | PostgreSQL 命名卷，默认 `account-manager_db-data` |
 | 数据库密码、凭据加密密钥、初始管理员密码 | `.local/secrets/` |
 | 部署参数 | 根目录 `.env` |
+| 自定义取码工具配置 | `MAIL_TOOLS_CONFIG_PATH` 指定的 TOML 文件，建议放在 `.local/` |
 | 默认备份目录 | `.local/backups/` |
 
 ```sh
@@ -136,6 +138,8 @@ python3 ops/backup.py .local/backups/manual-backup
 ```
 
 每个备份目录包含 PostgreSQL 自定义格式快照、凭据加密密钥和 SHA-256 校验清单。只有完整备份才能解密恢复供应商密码和 2FA 配置；备份包含敏感数据，应复制到受控的外部存储。
+
+备份脚本不打包部署配置。另行保存 `.env`、自定义工具 TOML 和对应版本的插件代码；数据库中的工具 ID 需要相应配置才能使用。
 
 恢复会替换当前数据库并中断业务服务，请确认目标实例与备份目录：
 

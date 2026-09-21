@@ -32,7 +32,7 @@ import {
   type Audit,
 } from "./api";
 import { Pool } from "./Accounts";
-import { MailBackendField } from "./MailBackendField";
+import { MailToolField } from "./MailToolField";
 import { Dialog, Events, fmt, iso, useResource } from "./ui";
 const required = [{ required: true, message: "请填写此项" }];
 export function AdminAccounts({
@@ -181,7 +181,7 @@ function ImportDialog({
               style={{ width: "100%" }}
             />
           </Form.Item>
-          <MailBackendField useDefault />
+          <MailToolField useDefault />
           <Form.Item
             rules={[dateTimeRule]}
             name="expires_at"
@@ -230,7 +230,7 @@ function ImportDialog({
               {preview.rows.map((r) => (
                 <div key={r.line}>
                   第 {r.line} 行 · {r.email} · {r.tier} ·{" "}
-                  {r.mail_backend_name || "不启用自动取码"} · •••• / ••••
+                  {r.mail_tool_name || "不启用自动取码"} · •••• / ••••
                 </div>
               ))}
             </div>

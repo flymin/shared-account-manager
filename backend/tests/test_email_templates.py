@@ -2,12 +2,11 @@ from email.message import EmailMessage
 
 import pytest
 
-from app.plugins import configured_templates
-from app.plugins.template_a import TemplateA
+from app.plugins import get_mail_tool
 
 
 def extract_code(raw):
-    template = TemplateA.from_environment()
+    template = get_mail_tool("mailcom").template
     assert template is not None
     return template.extract_code(raw)
 
@@ -91,8 +90,7 @@ def test_verification_rules_are_configurable_and_match_exact_sender(monkeypatch)
 def test_invalid_template_configuration_disables_template(monkeypatch, sender, subject):
     monkeypatch.setenv("MAIL_CODE_SENDER", sender)
     monkeypatch.setenv("MAIL_CODE_SUBJECT_KEYWORD", subject)
-    assert TemplateA.from_environment() is None
-    assert configured_templates() == ()
+    assert get_mail_tool("mailcom").template is None
 
 
 @pytest.mark.parametrize("outer_code", [None, "654321"])

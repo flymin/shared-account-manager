@@ -65,7 +65,7 @@ class Account(Base):
     email: Mapped[str] = mapped_column(String(254), unique=True)
     password_encrypted: Mapped[str] = mapped_column(Text)
     auth_password_encrypted: Mapped[str] = mapped_column(Text)
-    mail_backend: Mapped[str | None] = mapped_column(String(64))
+    mail_tool: Mapped[str | None] = mapped_column(String(64))
     mail_config_version: Mapped[int] = mapped_column(
         Integer, default=0, server_default="0"
     )
@@ -216,6 +216,8 @@ class EmailCodeRun(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     # The initiating login session must remain valid, including after password reset.
     session_hash: Mapped[str] = mapped_column(String(64))
+    mail_tool: Mapped[str] = mapped_column(String(64))
+    tool_config_hash: Mapped[str] = mapped_column(String(64))
     # Provider identity is frozen for each run, including persisted candidates.
     mail_backend: Mapped[str] = mapped_column(String(64))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

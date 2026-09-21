@@ -18,6 +18,10 @@ x-app: &app
     PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
     MAIL_CODE_SENDER: ${MAIL_CODE_SENDER:-}
     MAIL_CODE_SUBJECT_KEYWORD: ${MAIL_CODE_SUBJECT_KEYWORD:-}
+    MAIL_TOOLS_CONFIG_FILE: /run/config/mail-tools.toml
+  configs:
+    - source: mail_tools
+      target: /run/config/mail-tools.toml
   secrets:
     - db_password
     - credential_key
@@ -46,6 +50,7 @@ services:
       DB_PASSWORD_FILE: /run/secrets/db_password
       CREDENTIAL_KEY_FILE: /run/secrets/credential_key
       BOOTSTRAP_PASSWORD_FILE: /run/secrets/bootstrap_password
+      MAIL_TOOLS_CONFIG_FILE: /run/config/mail-tools.toml
     secrets: [db_password, credential_key, bootstrap_password]
     command: [sh, -c, 'alembic upgrade head && python -m app.cli bootstrap']
     depends_on:
@@ -94,5 +99,8 @@ secrets:
     file: ../.local/secrets/credential_key
   bootstrap_password:
     file: ../.local/secrets/bootstrap_password
+configs:
+  mail_tools:
+    file: ${MAIL_TOOLS_CONFIG_PATH:-../backend/app/plugins/tools.toml}
 volumes:
   db-data:

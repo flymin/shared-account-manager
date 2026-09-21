@@ -237,8 +237,8 @@ def account_dto(db, user, a, stamp=None):
     result = dict(
         id=a.id,
         email=a.email,
-        mail_backend=a.mail_backend,
-        mail_backend_name=mail_backend_name(a.mail_backend),
+        mail_tool=a.mail_tool,
+        mail_tool_name=mail_tool_name(a.mail_tool),
         tier=a.tier,
         disabled=a.disabled,
         created_at=a.created_at,
@@ -468,22 +468,22 @@ def invalidate(db, c, actor, reason, kind="revoked"):
     )
 
 
-def validate_mail_backend(identity):
-    from .plugins import get_mail_backend
+def validate_mail_tool(identity):
+    from .plugins import get_mail_tool
 
-    if identity is not None and get_mail_backend(identity) is None:
-        fail("请选择已安装的邮箱后端插件，或选择不启用", 422)
+    if identity is not None and get_mail_tool(identity) is None:
+        fail("请选择已注册的邮箱取码工具，或选择不启用", 422)
 
 
-def mail_backend_name(identity):
-    from .plugins import get_mail_backend
+def mail_tool_name(identity):
+    from .plugins import get_mail_tool
 
-    plugin = get_mail_backend(identity)
-    return plugin.name if plugin else "不可用插件" if identity else None
+    plugin = get_mail_tool(identity)
+    return plugin.name if plugin else "不可用工具" if identity else None
 
 
 def parse_import(db, data):
-    validate_mail_backend(data.mail_backend)
+    validate_mail_tool(data.mail_tool)
     errors, rows, seen = [], [], set()
     lines = data.text.splitlines()
     if len(lines) > 1000:
@@ -529,7 +529,7 @@ def import_accounts(db, user, data):
     for _, email, password, auth_password in rows:
         a = Account(
             email=email,
-            mail_backend=data.mail_backend,
+            mail_tool=data.mail_tool,
             tier=data.tier,
             expires_at=data.expires_at,
             capacity=data.capacity,
@@ -547,7 +547,7 @@ def import_accounts(db, user, data):
             a,
             {
                 "tier": data.tier,
-                "mail_backend": data.mail_backend,
+                "mail_tool": data.mail_tool,
                 "quota_reset_interval_days": data.quota_reset_interval_days,
             },
         )

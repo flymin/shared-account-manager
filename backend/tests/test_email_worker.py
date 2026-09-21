@@ -60,13 +60,13 @@ def test_removed_mail_rules_stop_existing_jobs_before_provider_access(
     monkeypatch.delenv("MAIL_CODE_SENDER")
     worker = EmailWorker(factory=factory)
     try:
-        worker.process(*lease_next())
+        worker.tick()
     finally:
         worker.close()
     assert not calls
     with Session() as db:
         run = db.get(EmailCodeRun, identity)
-        assert run.status == "failed" and run.error == "configuration"
+        assert run.status == "cancelled"
         assert run.code_encrypted is None
 
 

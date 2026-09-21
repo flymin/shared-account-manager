@@ -23,9 +23,11 @@ def test_legacy_accounts_jobs_backfill_and_downgrade_clears_candidates(
         transaction = connection.begin()
         try:
             operations = Operations(MigrationContext.configure(connection))
-            operations.drop_column("accounts", "mail_backend")
+            operations.drop_column("accounts", "mail_tool")
             operations.drop_column("accounts", "mail_config_version")
             operations.drop_column("email_code_runs", "mail_backend")
+            operations.drop_column("email_code_runs", "mail_tool")
+            operations.drop_column("email_code_runs", "tool_config_hash")
 
             def snapshot(table):
                 return [

@@ -13,9 +13,9 @@ from urllib.parse import parse_qs, quote, urlencode, urljoin, urlsplit, urlunspl
 
 import httpx
 
-from ..totp import current_code
-from ..mail import MailError, Message
-from .html import HTML, visible_text
+from ...totp import current_code
+from ...mail import MailError, Message
+from ..common.html import HTML, visible_text
 
 READ_SCOPE = "mail_mailbox_r"
 WRITE_SCOPE = "mail_mailbox_w"

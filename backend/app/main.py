@@ -21,8 +21,13 @@ from .models import (
 from .config import cipher
 from .verification_api import router as verification_router
 from .verification import cancel_account_runs
-from .plugins import mail_backend_options
+from .plugins import mail_tool_options
+from .plugins.tools import tool_catalog
 from .password_policy import password_error
+
+# Validate deployment configuration before serving requests. Importing a reusable
+# backend or template alone does not require a configured application.
+tool_catalog()
 
 app = FastAPI(
     title="Account Manager",
@@ -208,9 +213,9 @@ def events(
     ]
 
 
-@app.get("/api/v1/mail-backends")
-def mail_backends(user=Depends(auth.admin)):
-    return mail_backend_options()
+@app.get("/api/v1/mail-tools")
+def mail_tools(user=Depends(auth.admin)):
+    return mail_tool_options()
 
 
 @app.post("/api/v1/account-imports/preview")
@@ -224,8 +229,8 @@ def preview_import(
                 "line": row[0],
                 "email": row[1],
                 "tier": data.tier,
-                "mail_backend": data.mail_backend,
-                "mail_backend_name": d.mail_backend_name(data.mail_backend),
+                "mail_tool": data.mail_tool,
+                "mail_tool_name": d.mail_tool_name(data.mail_tool),
             }
             for row in rows
         ],
@@ -250,9 +255,9 @@ def update_account(
 ):
     a = d.get_account(db, user, account_id)
     values = data.model_dump(exclude_unset=True)
-    if "mail_backend" in values:
-        d.validate_mail_backend(data.mail_backend)
-    if ("mail_backend" in values and a.mail_backend != data.mail_backend) or values.get(
+    if "mail_tool" in values:
+        d.validate_mail_tool(data.mail_tool)
+    if ("mail_tool" in values and a.mail_tool != data.mail_tool) or values.get(
         "auth_password"
     ):
         cancel_account_runs(db, a.id)
@@ -261,7 +266,7 @@ def update_account(
         "tier",
         "capacity",
         "expires_at",
-        "mail_backend",
+        "mail_tool",
         "quota_reset_interval_days",
     ):
         if field in values:

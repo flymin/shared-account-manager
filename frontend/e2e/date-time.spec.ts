@@ -5,8 +5,8 @@ async function openPicker(page: Page) {
   const account = {
     id: "time-example",
     email: "time-example@example.test",
-    mail_backend: "mailcom",
-    mail_backend_name: "mail.com",
+    mail_tool: "mailcom",
+    mail_tool_name: "mail.com",
     tier: "20x",
     disabled: false,
     created_at: "2026-01-01T00:00:00Z",
@@ -49,7 +49,7 @@ async function openPicker(page: Page) {
         }
       : path.endsWith("/accounts")
         ? [account]
-        : path.endsWith("/mail-backends")
+        : path.endsWith("/mail-tools")
           ? { default: "mailcom", items: [{ id: "mailcom", name: "mail.com" }] }
           : [];
     await route.fulfill({ json: data });

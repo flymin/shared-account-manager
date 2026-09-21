@@ -1,24 +1,27 @@
-"""Template A: configurable sender/subject and one six-digit body code."""
+"""Six-digit code: configurable sender/subject and one six-digit body code."""
 
-import os
 import re
 from dataclasses import dataclass
 from email import policy
 from email.parser import BytesParser
 from email.utils import parseaddr
 
-from .html import HTML, visible_text
+from ..common.html import HTML, visible_text
 
 
 @dataclass(frozen=True)
-class TemplateA:
+class SixDigitCodeTemplate:
     sender: str
     subject_keyword: str
 
     @classmethod
-    def from_environment(cls):
-        sender = os.getenv("MAIL_CODE_SENDER", "").strip().casefold()
-        subject = os.getenv("MAIL_CODE_SUBJECT_KEYWORD", "").strip().casefold()
+    def from_config(cls, options):
+        if set(options) != {"sender", "subject_keyword"} or not all(
+            isinstance(value, str) for value in options.values()
+        ):
+            return None
+        sender = options["sender"].strip().casefold()
+        subject = options["subject_keyword"].strip().casefold()
         if (
             not re.fullmatch(r"[^@\s<>;,]+@[^@\s<>;,]+", sender)
             or len(sender) > 254

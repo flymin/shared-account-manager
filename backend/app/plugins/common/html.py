@@ -1,4 +1,8 @@
-"""Small HTML helpers shared by the bundled plugins."""
+"""Parse HTML into nodes for form/config lookup and visible email body text.
+
+Shared by mailbox backends and email templates; no network or provider rules.
+This is a parsing helper, not an HTML sanitizer or renderer.
+"""
 
 from html.parser import HTMLParser
 

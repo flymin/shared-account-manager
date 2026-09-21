@@ -5,8 +5,36 @@ from app.auth import hasher
 from app.db import Session, engine
 from app.main import app
 from app.models import Base, Settings, User
+from app.plugins.tools import ToolDefinition, tool_catalog
 
 PASSWORD = "Fictional-Test-Password-2026!"
+
+
+@pytest.fixture
+def register_tool(monkeypatch):
+    def register(
+        identity, backend="mailcom", template="six_digit_code", name=None, options=None
+    ):
+        definition = ToolDefinition.model_validate(
+            {
+                "id": identity,
+                "name": name or identity,
+                "backend": backend,
+                "template": template,
+                "options": options
+                if options is not None
+                else {
+                    "sender": {"env": "MAIL_CODE_SENDER"},
+                    "subject_keyword": {"env": "MAIL_CODE_SUBJECT_KEYWORD"},
+                },
+            }
+        )
+        catalog = tool_catalog()
+        others = [tool for tool in catalog.tools if tool.id != identity]
+        monkeypatch.setattr(catalog, "tools", [*others, definition])
+        return definition
+
+    return register
 
 
 @pytest.fixture(autouse=True)
@@ -16,6 +44,9 @@ def database(monkeypatch):
     )
     monkeypatch.setenv("MAIL_CODE_SENDER", "noreply@login.example.test")
     monkeypatch.setenv("MAIL_CODE_SUBJECT_KEYWORD", "ExampleService")
+    # Ignore deployment-specific tool catalogs in isolated tests.
+    monkeypatch.delenv("MAIL_TOOLS_CONFIG_FILE", raising=False)
+    tool_catalog.cache_clear()
     with Session.begin() as db:
         tables = ", ".join('"' + t.name + '"' for t in Base.metadata.sorted_tables)
         db.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
@@ -30,6 +61,7 @@ def database(monkeypatch):
             )
         )
     yield
+    tool_catalog.cache_clear()
 
 
 def login(username, password=PASSWORD):
@@ -81,7 +113,7 @@ def make_account(admin):
         capacity=None,
         expires_at=None,
         quota_reset_interval_days=None,
-        mail_backend="mailcom",
+        mail_tool="mailcom",
     ):
         response = admin.post(
             "/api/v1/account-imports",
@@ -93,7 +125,7 @@ def make_account(admin):
                 "capacity": capacity,
                 "expires_at": expires_at,
                 "quota_reset_interval_days": quota_reset_interval_days,
-                "mail_backend": mail_backend,
+                "mail_tool": mail_tool,
             },
         )
         assert response.status_code == 201, response.text

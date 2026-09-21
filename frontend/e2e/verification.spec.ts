@@ -19,8 +19,8 @@ function account(id = "account-one") {
   return {
     id,
     email: `${id}@example.test`,
-    mail_backend: "mailcom",
-    mail_backend_name: "mail.com",
+    mail_tool: "mailcom",
+    mail_tool_name: "mail.com",
     tier: "20x",
     disabled: false,
     created_at: TEST_TIME.toISOString(),
@@ -79,6 +79,8 @@ async function fixture(
     verificationStatus: 200,
     emailAvailable: true,
     emailConfigVersion: 0,
+    emailToolRevision: "synthetic-tool-revision-1",
+    mailTools: [{ id: "mailcom", name: "mail.com" }],
     findEmail: false,
     delayStart: false,
     busyAccount: "",
@@ -167,13 +169,20 @@ async function fixture(
       );
     }
     if (["/groups", "/users"].includes(path)) return send([]);
-    if (path === "/mail-backends")
+    if (path === "/mail-tools")
       return send({
         default: "mailcom",
-        items: [{ id: "mailcom", name: "mail.com" }],
+        items: state.mailTools,
       });
     const accountId = path.split("/")[2];
     const selected = accounts.find((a) => a.id === accountId);
+    if (selected && path === `/accounts/${accountId}` && method === "PATCH") {
+      Object.assign(selected, request.postDataJSON());
+      selected.mail_tool_name =
+        state.mailTools.find((tool) => tool.id === selected.mail_tool)?.name ||
+        "";
+      return send(selected);
+    }
     if (selected && path.endsWith("/credentials")) {
       if (state.credentialsStatus !== 200)
         return send({ detail: "测试凭据请求失败" }, state.credentialsStatus);
@@ -198,6 +207,7 @@ async function fixture(
         server_time: serverTime,
         email_available: state.emailAvailable,
         email_config_version: state.emailConfigVersion,
+        email_tool_revision: state.emailToolRevision,
         email_unavailable_reason: state.emailAvailable
           ? null
           : "未启用自动获取邮箱验证码",
@@ -333,6 +343,32 @@ async function fixture(
 test.describe("verification with synthetic APIs", () => {
   test.use({ timezoneId: "America/New_York" });
 
+  test("admin selects a newly registered tool by its catalog ID", async ({
+    page,
+  }) => {
+    const f = await fixture(page, { admin: true });
+    f.state.mailTools.push({ id: "other_login", name: "Other 登录验证码" });
+    await page.goto("/");
+    await navigation(page, "账号管理");
+    await page.getByRole("button", { name: "编辑", exact: true }).click();
+    await page
+      .locator(".ant-form-item")
+      .filter({ has: page.locator('label[for="mail_tool"]') })
+      .locator(".ant-select-selector")
+      .click();
+    await page
+      .locator(".ant-select-dropdown:visible")
+      .getByText("Other 登录验证码", { exact: true })
+      .click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".ant-modal")).toHaveCount(0);
+    expect(f.count("/accounts/account-one", "PATCH")).toBe(1);
+    await page.getByRole("button", { name: "编辑", exact: true }).click();
+    await expect(
+      page.locator(".ant-modal").getByText("Other 登录验证码", { exact: true }),
+    ).toBeVisible();
+  });
+
   test("disabling mail fetching clears an already displayed code and keeps service 2FA", async ({
     page,
   }) => {
@@ -352,7 +388,7 @@ test.describe("verification with synthetic APIs", () => {
       f.card().getByText("未启用自动获取邮箱验证码", { exact: true }),
     ).toBeVisible();
     await expect(f.refreshTotp("service")).toBeEnabled();
-    expect(f.count("/mail-backends")).toBe(0);
+    expect(f.count("/mail-tools")).toBe(0);
     expect(f.cancellations()).toBeGreaterThan(0);
     f.state.emailAvailable = true;
     await page.clock.fastForward(4000);
@@ -388,23 +424,28 @@ test.describe("verification with synthetic APIs", () => {
     ).toBeVisible();
   });
 
-  test("mail configuration revisions clear old results even when fetching stays available", async ({
-    page,
-  }) => {
-    const f = await fixture(page);
-    f.state.findEmail = true;
-    await f.openClaims();
-    await f.getEmail().click();
-    await page.clock.fastForward(1100);
-    await expect(f.card().getByText(EMAIL_CODE, { exact: true })).toBeVisible();
-    f.state.emailConfigVersion += 1;
-    await page.clock.fastForward(4000);
-    await expect(f.card().getByText(EMAIL_CODE, { exact: true })).toHaveCount(
-      0,
-    );
-    await expect(f.getEmail()).toBeEnabled();
-    expect(f.cancellations()).toBeGreaterThan(0);
-  });
+  for (const changed of ["account", "tool"] as const) {
+    test(`${changed} configuration revisions clear old results even when fetching stays available`, async ({
+      page,
+    }) => {
+      const f = await fixture(page);
+      f.state.findEmail = true;
+      await f.openClaims();
+      await f.getEmail().click();
+      await page.clock.fastForward(1100);
+      await expect(
+        f.card().getByText(EMAIL_CODE, { exact: true }),
+      ).toBeVisible();
+      if (changed === "account") f.state.emailConfigVersion += 1;
+      else f.state.emailToolRevision = "synthetic-tool-revision-2";
+      await page.clock.fastForward(4000);
+      await expect(f.card().getByText(EMAIL_CODE, { exact: true })).toHaveCount(
+        0,
+      );
+      await expect(f.getEmail()).toBeEnabled();
+      expect(f.cancellations()).toBeGreaterThan(0);
+    });
+  }
 
   test("another holder sees owner and countdown only, while a separate account can start", async ({
     page,

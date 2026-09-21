@@ -337,7 +337,7 @@ test("管理员通过界面创建组、用户并预览导入与编辑账号", as
   await expect(page.getByText("1 个账号检查通过")).toBeVisible();
   await page
     .locator(".ant-form-item")
-    .filter({ has: page.locator('label[for="mail_backend"]') })
+    .filter({ has: page.locator('label[for="mail_tool"]') })
     .locator(".ant-select-selector")
     .click();
   await page
@@ -366,7 +366,7 @@ test("管理员通过界面创建组、用户并预览导入与编辑账号", as
   ).toBeVisible();
   await page
     .locator(".ant-form-item")
-    .filter({ has: page.locator('label[for="mail_backend"]') })
+    .filter({ has: page.locator('label[for="mail_tool"]') })
     .locator(".ant-select-selector")
     .click();
   await page
@@ -383,7 +383,7 @@ test("管理员通过界面创建组、用户并预览导入与编辑账号", as
   const a = (await adminApi("/accounts")).find((x: any) => x.email === email);
   expect(a.capacity).toBe(2);
   expect(a.quota_reset_interval_days).toBe(14);
-  expect(a.mail_backend).toBe("mailcom");
+  expect(a.mail_tool).toBe("mailcom");
   expect(a.group_ids).toHaveLength(1);
   await page.getByRole("button", { name: "编辑", exact: true }).click();
   await expect(
@@ -407,11 +407,11 @@ test("管理员通过界面创建组、用户并预览导入与编辑账号", as
   ).toBeTruthy();
 });
 
-test("邮箱后端关闭后领用者不能自动取码，管理员可恢复且选择持久保存", async ({
+test("邮箱取码工具关闭后领用者不能自动取码，管理员可恢复且选择持久保存", async ({
   page,
 }) => {
   const { username, email, account } = await provision();
-  await adminApi(`/accounts/${account.id}`, "PATCH", { mail_backend: null });
+  await adminApi(`/accounts/${account.id}`, "PATCH", { mail_tool: null });
   await firstLogin(page, username);
   await claimUI(page);
   await expect(
@@ -420,7 +420,7 @@ test("邮箱后端关闭后领用者不能自动取码，管理员可恢复且�
   await expect(
     page.getByRole("button", { name: "获取邮箱验证码", exact: true }),
   ).toHaveCount(0);
-  await expect(page.getByLabel("邮箱后端", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("邮箱取码工具", { exact: true })).toHaveCount(0);
   await expect(
     page.locator(".verification").getByText("账号 2FA", { exact: true }),
   ).toBeVisible();
@@ -428,7 +428,7 @@ test("邮箱后端关闭后领用者不能自动取码，管理员可恢复且�
     page.getByText("Test-Auth-Password!", { exact: true }),
   ).toBeVisible();
   await adminApi(`/accounts/${account.id}`, "PATCH", {
-    mail_backend: "mailcom",
+    mail_tool: "mailcom",
   });
   await expect(
     page.getByRole("button", { name: "获取邮箱验证码", exact: true }),
@@ -440,7 +440,7 @@ test("邮箱后端关闭后领用者不能自动取码，管理员可恢复且�
   ).toBeEnabled();
   expect(
     (await adminApi("/accounts")).find((a: any) => a.email === email)
-      .mail_backend,
+      .mail_tool,
   ).toBe("mailcom");
 });
 

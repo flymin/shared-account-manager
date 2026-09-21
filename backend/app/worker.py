@@ -4,6 +4,7 @@ from .db import Session, write_lock
 from .domain import reconcile
 from .config import cipher
 from .email_worker import EmailWorker
+from .plugins.tools import tool_catalog
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("account-manager.worker")
@@ -16,6 +17,7 @@ def tick():
 
 
 if __name__ == "__main__":
+    tool_catalog()
     cipher()
     email_worker = EmailWorker()
     next_reconcile = 0

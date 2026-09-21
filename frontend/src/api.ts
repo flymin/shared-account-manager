@@ -76,8 +76,8 @@ export type Group = { id: string; name: string; user_ids: string[] };
 export type Account = {
   id: string;
   email: string;
-  mail_backend: string | null;
-  mail_backend_name: string | null;
+  mail_tool: string | null;
+  mail_tool_name: string | null;
   tier: string;
   disabled: boolean;
   created_at: string;

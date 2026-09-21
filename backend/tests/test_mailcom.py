@@ -9,13 +9,13 @@ import httpx
 import pytest
 
 from app.mail import Candidate, MailError, find_candidate
-from app.plugins import configured_templates
-from app.plugins.mailcom import MailComClient, receipt_time
+from app.plugins import get_mail_tool
+from app.plugins.backends.mailcom import MailComClient, receipt_time
 from test_email_templates import mail
 
 
 def find_code(client, *args):
-    return find_candidate(client, configured_templates(), *args)
+    return find_candidate(client, [get_mail_tool("mailcom").template], *args)
 
 
 class ProviderFixture:
@@ -358,7 +358,7 @@ def test_budget_exhaustion_during_body_read_is_retryable(monkeypatch):
     client = MailComClient(
         "fixture@example.test", "fictional", transport=httpx.MockTransport(respond)
     )
-    monkeypatch.setattr("app.plugins.mailcom.time.monotonic", lambda: stamp[0])
+    monkeypatch.setattr("app.plugins.backends.mailcom.time.monotonic", lambda: stamp[0])
     client.budget = 10.0
     with pytest.raises(MailError) as error:
         client.request("GET", "https://www.mail.com/")
@@ -380,7 +380,7 @@ def test_slow_permission_fence_cannot_send_past_deadline(monkeypatch):
     client = MailComClient(
         "fixture@example.test", "fictional", transport=httpx.MockTransport(respond)
     )
-    monkeypatch.setattr("app.plugins.mailcom.time.monotonic", lambda: stamp[0])
+    monkeypatch.setattr("app.plugins.backends.mailcom.time.monotonic", lambda: stamp[0])
     client.budget = 10.0
     with pytest.raises(MailError, match="network"):
         client.request(

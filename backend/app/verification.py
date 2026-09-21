@@ -7,14 +7,14 @@ from sqlalchemy import delete, select
 
 from . import auth, domain as d
 from .config import cipher
-from .plugins import configured_templates, get_mail_backend
+from .plugins import get_mail_tool
 from .models import Account, EmailCodeRun, LoginSession, TwoFactor, User, now
 
 ACTIVE = ("pending", "reading")
 ERRORS = {
     "configuration": "邮箱验证码匹配规则未配置或无效，请联系管理员",
-    "backend_disabled": "未启用自动获取邮箱验证码",
-    "backend_unavailable": "邮箱后端插件不可用，请联系管理员",
+    "tool_disabled": "未启用自动获取邮箱验证码",
+    "tool_unavailable": "邮箱取码工具不可用，请联系管理员",
     "authentication": "邮箱登录失败，请检查邮箱密码",
     "challenge": "邮箱要求额外登录验证，请先在邮箱网站完成验证",
     "two_factor_required": "暂不支持邮箱 2FA，请在邮箱网站手动查看验证码",
@@ -30,14 +30,18 @@ def valid_owner(db, run, stamp):
     user = db.get(User, run.user_id)
     account = db.get(Account, run.account_id)
     session = db.get(LoginSession, run.session_hash)
+    tool = get_mail_tool(run.mail_tool)
     return bool(
         user
         and not user.deleted
         and not user.must_change_password
         and account
         and not account.deleted
-        and account.mail_backend == run.mail_backend
-        and get_mail_backend(run.mail_backend) is not None
+        and account.mail_tool == run.mail_tool
+        and tool is not None
+        and tool.template is not None
+        and tool.backend.id == run.mail_backend
+        and tool.config_hash == run.tool_config_hash
         and session
         and session.user_id == user.id
         and session.expires_at > stamp
@@ -68,11 +72,12 @@ def cancel_account_runs(db, account_id):
 
 
 def email_unavailable(account):
-    if account.mail_backend is None:
-        return "backend_disabled"
-    if get_mail_backend(account.mail_backend) is None:
-        return "backend_unavailable"
-    if not configured_templates():
+    if account.mail_tool is None:
+        return "tool_disabled"
+    tool = get_mail_tool(account.mail_tool)
+    if tool is None:
+        return "tool_unavailable"
+    if tool.template is None:
         return "configuration"
     return None
 
@@ -116,8 +121,10 @@ def status(db, user, account_id):
     stamp = now()
     result = {"server_time": stamp, "two_factor": {}, "email": None}
     unavailable = email_unavailable(account)
+    tool = get_mail_tool(account.mail_tool)
     result.update(
         email_config_version=account.mail_config_version,
+        email_tool_revision=tool.config_hash if tool else None,
         email_available=unavailable is None,
         email_unavailable_reason=ERRORS.get(unavailable),
     )
@@ -162,7 +169,7 @@ def start_run(db, user, session, account_id, run_id):
     unavailable = email_unavailable(account)
     if unavailable:
         raise HTTPException(
-            409 if unavailable == "backend_disabled" else 503, ERRORS[unavailable]
+            409 if unavailable == "tool_disabled" else 503, ERRORS[unavailable]
         )
     active = db.scalar(
         select(EmailCodeRun).where(
@@ -171,12 +178,15 @@ def start_run(db, user, session, account_id, run_id):
     )
     if active:
         raise HTTPException(409, "此账号正在获取邮箱验证码，请等待或取消当前任务")
+    tool = get_mail_tool(account.mail_tool)
     run = EmailCodeRun(
         id=run_id,
         account_id=account.id,
         user_id=user.id,
         session_hash=session.token_hash,
-        mail_backend=account.mail_backend,
+        mail_tool=tool.id,
+        mail_backend=tool.backend.id,
+        tool_config_hash=tool.config_hash,
         started_at=stamp,
         since=stamp - timedelta(minutes=2),
         deadline=stamp + timedelta(minutes=d.settings(db).email_code_timeout_minutes),

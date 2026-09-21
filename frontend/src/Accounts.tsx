@@ -33,7 +33,7 @@ import {
   type AccountStatus,
 } from "./accountList";
 import { AccountStatusFilter } from "./AccountStatusFilter";
-import { MailBackendField } from "./MailBackendField";
+import { MailToolField } from "./MailToolField";
 import {
   Credentials,
   CopyButton,
@@ -240,7 +240,7 @@ export function AccountDialog({
           >
             <DateTimeInput />
           </Form.Item>
-          <MailBackendField />
+          <MailToolField />
           <Form.Item name="group_ids" label="可见用户组">
             <Select
               mode="multiple"
@@ -685,7 +685,7 @@ export function Pool({
                   </div>
                   {adminMode && (
                     <small className="muted">
-                      邮箱：{a.mail_backend_name || "不启用自动取码"}
+                      邮箱：{a.mail_tool_name || "不启用自动取码"}
                     </small>
                   )}
                 </>
@@ -807,8 +807,8 @@ export function Pool({
             {adminMode && (
               <div className="account-access-meta">
                 <div>
-                  <span className="muted">邮箱后端：</span>
-                  {a.mail_backend_name || "不启用自动取码"}
+                  <span className="muted">邮箱取码工具：</span>
+                  {a.mail_tool_name || "不启用自动取码"}
                 </div>
                 <div>
                   <span className="muted">可见用户组：</span>
@@ -876,7 +876,7 @@ export function Pool({
             <Quota a={currentDetail} />
             {adminMode && (
               <p className="small muted">
-                邮箱后端：{currentDetail.mail_backend_name || "不启用自动取码"}
+                邮箱取码工具：{currentDetail.mail_tool_name || "不启用自动取码"}
               </p>
             )}
             {user.role === "admin" && (

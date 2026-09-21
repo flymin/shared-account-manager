@@ -12,6 +12,7 @@ type Config = {
 type Status = {
   server_time: string;
   email_available: boolean;
+  email_tool_revision: string | null;
   email_config_version: number;
   email_unavailable_reason: string | null;
   two_factor: Record<Kind, Config>;
@@ -74,7 +75,7 @@ export function Verification({
   const session = useRef(getSessionVersion());
   const generation = useRef(0);
   const lifecycle = useRef(0);
-  const mailConfigVersion = useRef<number | null>(null);
+  const mailConfigVersion = useRef<string | null>(null);
   const base = `/accounts/${accountId}`;
   const canUpdate = () =>
     alive.current && session.current === getSessionVersion();
@@ -122,10 +123,11 @@ export function Verification({
             },
           }));
           setError("");
+          const mailVersion = `${data.email_config_version}:${data.email_tool_revision || ""}`;
           const mailChanged =
             mailConfigVersion.current !== null &&
-            mailConfigVersion.current !== data.email_config_version;
-          mailConfigVersion.current = data.email_config_version;
+            mailConfigVersion.current !== mailVersion;
+          mailConfigVersion.current = mailVersion;
           if ((!data.email_available || mailChanged) && runId.current) {
             generation.current += 1;
             void cancelId(runId.current);

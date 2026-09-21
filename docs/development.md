@@ -20,9 +20,10 @@ flowchart LR
     Web --> API[api · FastAPI]
     API --> DB[(db · PostgreSQL)]
     Worker[worker · 定时结算与邮箱任务] --> DB
-    Worker --> Interface[邮箱通用接口]
-    Interface --> Backend[邮箱后端插件]
-    Interface --> Template[邮件模板插件]
+    Worker --> Tool[账号所选取码工具]
+    Config[TOML 工具配置] --> Tool
+    Tool --> Backend[邮箱后端插件]
+    Tool --> Template[邮件模板插件]
     Backend --> Mail[邮箱服务 · 按需取码]
     Init[init · 迁移与初始化] --> DB
 ```
@@ -44,7 +45,7 @@ flowchart LR
 
 `GET /api/v1/accounts?scope=hall` 返回未停用且未过期的授权账号；默认列表保留停用与过期条目。管理员通过 `PUT /api/v1/accounts/{id}/activation` 和 `{"enabled": false}` 停用账号，使用 `true` 恢复，重复调用不会重复生成状态变更历史。
 
-管理员通过 `GET /api/v1/mail-backends` 获取后端插件选项和默认值。账号导入、导入预览与编辑支持 `mail_backend`：插件 ID 表示启用，显式 `null` 表示不启用；导入省略该字段使用默认后端，编辑省略该字段保留原值。未知 ID 拒绝写入，账号响应包含 `mail_backend` 与 `mail_backend_name`。普通用户不能修改该字段。
+管理员通过 `GET /api/v1/mail-tools` 获取已注册取码工具的选项和默认值。账号导入、导入预览与编辑支持 `mail_tool`：工具 ID 表示启用，显式 `null` 表示不启用；导入省略该字段使用配置的默认工具，编辑省略该字段保留原值。未知 ID 拒绝写入，账号响应包含 `mail_tool` 与 `mail_tool_name`。普通用户不能修改该字段。
 
 服务端使用基于 Cookie 的会话认证，写请求校验来源及 CSRF。登录密码使用 Argon2id，供应商密码使用 Fernet 加密。凭据响应设置 `Cache-Control: no-store`；导入错误、日志和操作历史不包含供应商密码。
 
@@ -58,7 +59,7 @@ flowchart LR
 
 | 方法与路径 | 行为 |
 | --- | --- |
-| `GET /verification` | 账号 2FA 配置状态、取码占用者及截止时间；`email_available` 与 `email_unavailable_reason` 表示取码可用性，`email_config_version` 用于配置变更后清除旧结果；不含密钥或验证码 |
+| `GET /verification` | 账号 2FA 配置状态、取码占用者及截止时间；`email_available` 与 `email_unavailable_reason` 表示取码可用性，`email_config_version` 和 `email_tool_revision` 用于账号或工具配置变更后清除旧结果；不含密钥或验证码 |
 | `POST /email-code-runs` | JSON `{"id":"客户端生成的 UUID"}`，创建独占任务；重复请求同 ID 幂等 |
 | `GET /email-code-runs/{id}` | 仅发起者查询；成功返回 `code` 与 UTC `received_at` |
 | `DELETE /email-code-runs/{id}` | 发起者取消任务并清除结果 |
@@ -72,13 +73,15 @@ flowchart LR
 
 邮箱后端通过通用接口返回未读邮件元数据和原文，模板插件负责匹配及解析。核心层不依赖具体邮箱协议或验证码格式；插件仅在显式注册表中安装，详细接口与扩展步骤见[邮件插件开发](mail-plugins.md)。真实邮箱测试只能在被授权的测试账号上进行，不将原文、Cookie 或验证码复制到夹具。
 
-内置 Template A 从部署环境读取发件人和主题规则，列表元数据与原始邮件使用同一组规则校验。没有可用模板时，API 不新建取码任务，worker 也不会访问邮箱。协议测试使用虚构发件人、主题与内存响应。任务绑定创建时的后端，管理员修改后端或邮箱密码会取消已有任务，清除结果并使原租约失效；邮件 ID 按账号及后端去重。
+工具由 TOML 配置组合已注册的邮箱后端和邮件模板，工具层解析配置中的环境变量引用后将参数传给模板工厂。每次任务只使用所选工具的模板。任务绑定工具 ID、实际后端和生效配置摘要；管理员修改工具、邮箱密码或工具定义后，旧任务不再允许标记邮件或发布结果。消息 ID 按账号和实际后端去重，同一后端的不同工具共享去重记录。详细配置和扩展流程见[工具与插件指南](mail-plugins.md)。
 
 迁移 `0005` 同时兼容旧版的服务类型与新安装的通用类型，将账号 2FA 和相关审计标识统一为 `service`，保持密文及版本不变。旧约束和类型映射保存在数据库约束注释中以支持降级，不写入源码；测试覆盖旧数据迁移、取消后的配置、邮箱配置保留和往返降级。
 
 迁移 `0006` 为已有账号和取码任务补全原后端标识，新增账号的默认值由导入 API 提供，数据库中的 `null` 保持关闭语义。降级会取消任务并清除结果后移除后端字段，避免旧代码恢复不同后端的任务。
 
 迁移 `0007` 增加额度自动重置间隔：系统设置 `quota_reset_interval_days` 默认7天，账号同名字段可为空以沿用全局设置；两者均限制为1–365的整数。管理员的批量导入与账号编辑支持覆盖；编辑省略字段保留原值，显式 `null` 清除覆盖。修改间隔不改变已登记的 `reset_at`。到期后以原计划时间为基准按间隔推进，跨越多个周期时一次计算出严格晚于当前时间的下次重置点，只记录一次补处理事件；重启后不会重复处理同一周期。手动反馈可继续覆盖或清除下一次时间。
+
+迁移 `0008` 将账号的 `mail_backend` 改为 `mail_tool`，保留原选择值及空值；取码任务增加工具 ID 和配置摘要，原后端字段继续用于消息去重。旧任务未记录模板配置，因此取消未结束任务及有效结果，保留历史消息 ID。降级关闭账号自动取码，防止工具 ID 被旧应用解释为错误的邮箱后端。
 
 `/api/docs` 提供 Swagger UI；生产 Web 的 CSP 禁止外部脚本，交互式 Swagger UI 应在受控开发环境中直接访问 API，或使用 OpenAPI 文件生成客户端。
 
@@ -114,7 +117,7 @@ Playwright 用例包含桌面与移动端项目，部分用例会修改管理员
 
 ```sh
 # 从项目根目录启动独立测试项目；端口可按需修改。
-PUBLIC_ORIGIN= HTTP_PORT=8081 COMPOSE_PROJECT_NAME=account-manager-e2e \
+PUBLIC_ORIGIN= HTTP_PORT=8081 COMPOSE_PROJECT_NAME=account-manager-e2e MAIL_TOOLS_CONFIG_PATH= \
   MAIL_CODE_SENDER=noreply@login.example.test MAIL_CODE_SUBJECT_KEYWORD=ExampleService \
   ./ops/compose.sh up -d --no-build --wait
 
@@ -143,10 +146,10 @@ PUBLIC_ORIGIN= python3 ops/verify_runtime.py --base-url http://localhost:8081 \
 
 验收脚本仅为指定测试部署设置虚构邮件匹配规则；在 worker 停止时创建测试任务，并在恢复前将其置为超时，不访问真实邮箱。
 
-验收通过管理员配置账号 2FA、普通领用者读取代码的真实流程，检查容器重建后配置仍可用、过期邮箱任务能结束，以及备份恢复后密码和 2FA 配置仍可解密，同时验证账号后端选择和不启用状态能持久保存、随备份恢复。
+验收通过管理员配置账号 2FA、普通领用者读取代码的真实流程，检查容器重建后配置仍可用、过期邮箱任务能结束，以及备份恢复后密码和 2FA 配置仍可解密，同时验证账号工具选择、配置摘要和不启用状态能持久保存、随备份恢复。
 
 ## 代码组织
 
-`backend/app/` 放 API、业务规则、模型、认证与 worker，其中 `mail.py` 定义邮箱接口和通用取码流程，`plugins/` 放插件实现与注册表；`backend/migrations/` 放迁移；`frontend/src/` 放界面和 API 客户端。`deploy/` 放镜像与服务配置，`ops/` 放运维工具，`docs/` 放文档。
+`backend/app/` 放 API、业务规则、模型、认证与 worker，其中 `mail.py` 定义邮箱接口和通用取码流程。`plugins/backends/` 与 `plugins/templates/` 分别放邮箱后端、邮件模板及各自注册表，`plugins/common/` 放共用工具。`plugins/tools.py` 根据 TOML 组装取码工具，顶层 `plugins/__init__.py` 汇总公共调用入口。`backend/migrations/` 放迁移；`frontend/src/` 放界面和 API 客户端。`deploy/` 放镜像与服务配置，`ops/` 放运维工具，`docs/` 放文档。
 
 运维脚本统一通过 `ops/compose.sh` 调用 Compose，避免依赖调用者的工作目录。新增部署配置时使用相对项目路径和环境变量；实际主机、用户名、凭据、私有 CA 与运行数据保存在被忽略的本地文件中。

@@ -77,6 +77,7 @@ def main():
     env = {
         **os.environ,
         "COMPOSE_PROJECT_NAME": args.project,
+        "MAIL_TOOLS_CONFIG_PATH": "",
         "MAIL_CODE_SENDER": "noreply@login.example.test",
         "MAIL_CODE_SUBJECT_KEYWORD": "ExampleService",
     }
@@ -151,27 +152,29 @@ def main():
         },
     )
     a = next(a for a in admin.call("/accounts") if a["email"] == email)
-    default_backend = admin.call("/mail-backends")["default"]
-    assert a["mail_backend"] == default_backend
+    default_tool = admin.call("/mail-tools")["default"]
+    assert a["mail_tool"] == default_tool
+    tool_revision = admin.call(f"/accounts/{a['id']}/verification")["email_tool_revision"]
+    assert tool_revision
     admin.call(
         "/account-imports",
         "POST",
         {
             "tier": "5x",
             "text": f"disabled-{email}----Runtime-Test-Secret----Runtime-Test-Auth",
-            "mail_backend": None,
+            "mail_tool": None,
         },
     )
     disabled_account = next(
         item for item in admin.call("/accounts") if item["email"] == f"disabled-{email}"
     )
 
-    def check_mail_backends():
-        assert admin.call(f"/accounts/{a['id']}")["mail_backend"] == default_backend
-        assert (
-            admin.call(f"/accounts/{a['id']}/verification")["email_config_version"] == 0
-        )
-        assert admin.call(f"/accounts/{disabled_account['id']}")["mail_backend"] is None
+    def check_mail_tools():
+        assert admin.call(f"/accounts/{a['id']}")["mail_tool"] == default_tool
+        selected = admin.call(f"/accounts/{a['id']}/verification")
+        assert selected["email_config_version"] == 0
+        assert selected["email_tool_revision"] == tool_revision
+        assert admin.call(f"/accounts/{disabled_account['id']}")["mail_tool"] is None
         status = admin.call(f"/accounts/{disabled_account['id']}/verification")
         assert not status["email_available"] and status["email_config_version"] == 0
 
@@ -210,7 +213,7 @@ def main():
         assert len(user.call(totp_path + "/code")["code"]) == 6
 
     check_totp()
-    check_mail_backends()
+    check_mail_tools()
     secrets = ROOT / ".local/secrets"
     before = {
         p.name: hashlib.sha256(p.read_bytes()).hexdigest()
@@ -268,7 +271,7 @@ def main():
         == "Runtime-Test-Auth"
     )
     check_totp()
-    check_mail_backends()
+    check_mail_tools()
     assert (
         user.call(f"/accounts/{a['id']}/email-code-runs/{run['id']}")["status"]
         == "timed_out"
@@ -291,11 +294,11 @@ def main():
     )
     user.call(f"/accounts/{a['id']}/quota-reports", "POST", {"quota": 17})
     removed = admin.call(totp_path + "?version=1", "DELETE")
-    admin.call(f"/accounts/{a['id']}", "PATCH", {"mail_backend": None})
+    admin.call(f"/accounts/{a['id']}", "PATCH", {"mail_tool": None})
     admin.call(
         f"/accounts/{disabled_account['id']}",
         "PATCH",
-        {"mail_backend": default_backend},
+        {"mail_tool": default_tool},
     )
     assert not removed["configured"] and removed["version"] == 2
     admin.call(f"/claims/{c['id']}/revocation", "PUT", {"reason": "恢复前的测试变更"})
@@ -306,7 +309,7 @@ def main():
     assert restored["quota_reset_interval_days"] == 3
     assert user.call("/claims")[0]["invalidated_at"] is None
     check_totp()
-    check_mail_backends()
+    check_mail_tools()
     assert (
         user.call(f"/accounts/{a['id']}/credentials")["password"]
         == "Runtime-Test-Secret"

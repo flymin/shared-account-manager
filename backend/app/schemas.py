@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .password_policy import MIN_LENGTH, MAX_LENGTH
-from .plugins import DEFAULT_MAIL_BACKEND
+from .plugins import default_mail_tool
 
 NewPassword = Annotated[str, Field(min_length=MIN_LENGTH, max_length=MAX_LENGTH)]
 
@@ -66,8 +66,8 @@ class TimeInput(Input):
 class ImportInput(TimeInput):
     text: str = Field(min_length=1, max_length=500000)
     tier: Literal["5x", "20x"]
-    mail_backend: str | None = Field(
-        default=DEFAULT_MAIL_BACKEND, min_length=1, max_length=64
+    mail_tool: str | None = Field(
+        default_factory=default_mail_tool, min_length=1, max_length=64
     )
     group_ids: list[str] = Field(default_factory=list, max_length=100)
     user_ids: list[str] = Field(default_factory=list, max_length=1000)
@@ -80,7 +80,7 @@ class ImportInput(TimeInput):
 
 class AccountPatch(TimeInput):
     tier: Literal["5x", "20x"] | None = None
-    mail_backend: str | None = Field(default=None, min_length=1, max_length=64)
+    mail_tool: str | None = Field(default=None, min_length=1, max_length=64)
     group_ids: list[str] | None = Field(default=None, max_length=100)
     user_ids: list[str] | None = Field(default=None, max_length=1000)
     expires_at: datetime | None = None
