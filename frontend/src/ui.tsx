@@ -320,7 +320,8 @@ export function eventText(e: Audit) {
   if (d.quota !== undefined) parts.push(`剩余 ${d.quota}%`);
   if (d.reset_at) parts.push(`重置 ${fmt(d.reset_at)}`);
   if (d.next_reset_at) parts.push(`下次重置 ${fmt(d.next_reset_at)}`);
-  if (d.categories?.length) parts.push(d.categories.join("、"));
+  if (d.categories?.length)
+    parts.push((d.category_names || d.categories).join("、"));
   if (d.note) parts.push(d.note);
   if (d.reason)
     parts.push(
@@ -354,6 +355,10 @@ export function eventText(e: Audit) {
   if (e.kind === "settings_updated")
     parts.push(
       `账号人数 ${d.account_capacity} · 用户名额 ${d.user_claim_limit} · 观察 ${d.observation_hours}h · 冷却 ${d.cooldown_hours}h${d.quota_reset_interval_days !== undefined ? ` · 额度重置 ${d.quota_reset_interval_days}天` : ""}`,
+    );
+  if (d.account_options)
+    parts.push(
+      `档位 ${d.account_options.tiers.length} 类 · 异常 ${d.account_options.anomaly_categories.length} 类`,
     );
   return parts.join(" · ");
 }

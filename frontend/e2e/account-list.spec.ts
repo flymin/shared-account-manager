@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import type { Audit } from "../src/api";
+import { defaultAccountOptions } from "./option-fixtures";
 
 const common = {
   tier: "5x",
@@ -84,6 +85,8 @@ async function openFixture(
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/v1", "");
     expect(route.request().method()).toBe("GET");
+    if (path === "/account-options")
+      return route.fulfill({ json: defaultAccountOptions });
     const user = {
       id: "viewer",
       username: "viewer",

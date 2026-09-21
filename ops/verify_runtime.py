@@ -141,11 +141,16 @@ def main():
     )
     user.login(u["username"], password + "new")
     email = f"verify-{unique}@example.test"
+    tiers = [
+        item["id"]
+        for item in admin.call("/account-options")["tiers"]
+        if item["enabled"]
+    ]
     admin.call(
         "/account-imports",
         "POST",
         {
-            "tier": "20x",
+            "tier": tiers[-1],
             "text": f"{email}----Runtime-Test-Secret----Runtime-Test-Auth",
             "user_ids": [u["id"]],
             "quota_reset_interval_days": 3,
@@ -154,13 +159,15 @@ def main():
     a = next(a for a in admin.call("/accounts") if a["email"] == email)
     default_tool = admin.call("/mail-tools")["default"]
     assert a["mail_tool"] == default_tool
-    tool_revision = admin.call(f"/accounts/{a['id']}/verification")["email_tool_revision"]
+    tool_revision = admin.call(f"/accounts/{a['id']}/verification")[
+        "email_tool_revision"
+    ]
     assert tool_revision
     admin.call(
         "/account-imports",
         "POST",
         {
-            "tier": "5x",
+            "tier": tiers[0],
             "text": f"disabled-{email}----Runtime-Test-Secret----Runtime-Test-Auth",
             "mail_tool": None,
         },

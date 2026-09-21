@@ -33,6 +33,11 @@ import {
 } from "./api";
 import { Pool } from "./Accounts";
 import { MailToolField } from "./MailToolField";
+import {
+  AccountOptionsEditor,
+  TierField,
+  useTierFilters,
+} from "./AccountOptions";
 import { Dialog, Events, fmt, iso, useResource } from "./ui";
 const required = [{ required: true, message: "请填写此项" }];
 export function AdminAccounts({
@@ -124,7 +129,7 @@ function ImportDialog({
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ tier: "5x", group_ids: [], user_ids: [] }}
+          initialValues={{ group_ids: [], user_ids: [] }}
           onFinish={async (v) => {
             setSaving(true);
             try {
@@ -155,14 +160,7 @@ function ImportDialog({
           </Form.Item>
           <Row gutter={16}>
             <Col xs={24} md={12}>
-              <Form.Item name="tier" label="本批账号档位" rules={required}>
-                <Select
-                  options={[
-                    { value: "5x", label: "5x" },
-                    { value: "20x", label: "20x" },
-                  ]}
-                />
-              </Form.Item>
+              <TierField label="本批账号档位" useDefault />
             </Col>
             <Col xs={24} md={12}>
               <Form.Item name="capacity" label="人数上限（留空沿用全局）">
@@ -229,7 +227,7 @@ function ImportDialog({
               ))}
               {preview.rows.map((r) => (
                 <div key={r.line}>
-                  第 {r.line} 行 · {r.email} · {r.tier} ·{" "}
+                  第 {r.line} 行 · {r.email} · {r.tier_name || r.tier} ·{" "}
                   {r.mail_tool_name || "不启用自动取码"} · •••• / ••••
                 </div>
               ))}
@@ -557,7 +555,7 @@ export function SystemSettings({
             ["user_claim_limit", "每个用户的默认领用数量", 1000],
             ["account_capacity", "每个账号的默认同时领用人数", 1000],
             ["observation_hours", "异常账号领用观察时长（小时）", 8760],
-            ["cooldown_hours", "异常冷却时长（小时）", 8760],
+            ["cooldown_hours", "默认异常冷却时长（小时）", 8760],
             ["session_days", "登录会话有效期（天，新登录生效）", 90],
             [
               "email_code_timeout_minutes",
@@ -583,9 +581,10 @@ export function SystemSettings({
           >
             <InputNumber min={1} max={100} precision={0} />
           </Form.Item>
+          <AccountOptionsEditor />
           <Alert
             type="info"
-            message="调整观察或冷却时长会按原有时间起点重新计算；自动恢复显示为“可能恢复”。"
+            message="调整间隔会按异常原有时间起点计算，下次检查时生效。领用观察达标或异常冷却结束，任一条件满足均会标记为“可能恢复”；类别间隔仅覆盖冷却规则。"
           />
           <Button type="primary" htmlType="submit">
             保存设置
@@ -602,6 +601,7 @@ export function Dashboard({
   epoch: number;
   refresh: () => void;
 }) {
+  const tierFilters = useTierFilters();
   const [q, setQ] = useState(""),
     [state, setState] = useState("all"),
     [page, setPage] = useState(0),
@@ -615,7 +615,7 @@ export function Dashboard({
     );
   const path =
     `/claims?scope=all&limit=50&offset=${page * 50}&q=${encodeURIComponent(q)}&state=${state}` +
-    (tier === "all" ? "" : `&tier=${tier}`) +
+    (tier === "all" ? "" : `&tier=${encodeURIComponent(tier)}`) +
     (group === "all" ? "" : `&group_id=${group}`);
   const { data: filtered = [], error: claimError } = useResource<Claim[]>(
     path,
@@ -697,11 +697,7 @@ export function Dashboard({
               setTier(v);
               setPage(0);
             }}
-            options={[
-              { value: "all", label: "全部档位" },
-              { value: "5x", label: "5x" },
-              { value: "20x", label: "20x" },
-            ]}
+            options={tierFilters}
           />
           <Select
             value={group}

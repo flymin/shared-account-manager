@@ -14,6 +14,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from .config import default_account_options
 
 
 def now():
@@ -69,7 +70,7 @@ class Account(Base):
     mail_config_version: Mapped[int] = mapped_column(
         Integer, default=0, server_default="0"
     )
-    tier: Mapped[str] = mapped_column(String(3))
+    tier: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     capacity: Mapped[int | None] = mapped_column(Integer)
@@ -89,7 +90,7 @@ class Account(Base):
     anomaly_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     health_version: Mapped[int] = mapped_column(Integer, default=0)
     __table_args__ = (
-        CheckConstraint("tier IN ('5x','20x')"),
+        CheckConstraint("length(tier) BETWEEN 1 AND 64", name="accounts_tier_length"),
         CheckConstraint("capacity IS NULL OR capacity > 0"),
         CheckConstraint("quota IS NULL OR quota BETWEEN 0 AND 100"),
         CheckConstraint(
@@ -158,6 +159,9 @@ class Settings(Base):
     account_capacity: Mapped[int] = mapped_column(Integer, default=1)
     observation_hours: Mapped[int] = mapped_column(Integer, default=4)
     cooldown_hours: Mapped[int] = mapped_column(Integer, default=24)
+    account_options: Mapped[dict] = mapped_column(
+        JSONB, default=default_account_options
+    )
     session_days: Mapped[int] = mapped_column(Integer, default=7)
     email_code_timeout_minutes: Mapped[int] = mapped_column(
         Integer, default=5, server_default="5"

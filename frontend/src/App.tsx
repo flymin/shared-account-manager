@@ -24,6 +24,7 @@ import {
 } from "@ant-design/icons";
 import { api, setCsrf, getSessionVersion, type Person } from "./api";
 import { Pool, MyClaims } from "./Accounts";
+import { AccountOptionsProvider } from "./AccountOptions";
 import {
   AdminAccounts,
   People,
@@ -191,122 +192,126 @@ export default function App() {
   ];
   const selected = names[page] || names.pool;
   return (
-    <Layout key={getSessionVersion()} className="app-shell">
-      <Sider width={220} className="sidebar" theme="light">
-        <Brand />
-        <div className="nav-label">工作空间</div>
-        <Menu
-          mode="inline"
-          selectedKeys={[page]}
-          items={entries}
-          onClick={(e) => setPage(e.key)}
-        />
-        <div className="sidebar-bottom">
-          <span className="status-dot" /> 数据持久化存储
-        </div>
-      </Sider>
-      <Layout>
-        <Header className="topbar">
-          <div className="breadcrumb">
-            <span className="breadcrumb-parent">
-              工作空间 <span className="breadcrumb-separator">/</span>
-            </span>
-            {selected[0]}
+    <AccountOptionsProvider key={getSessionVersion()} epoch={epoch}>
+      <Layout className="app-shell">
+        <Sider width={220} className="sidebar" theme="light">
+          <Brand />
+          <div className="nav-label">工作空间</div>
+          <Menu
+            mode="inline"
+            selectedKeys={[page]}
+            items={entries}
+            onClick={(e) => setPage(e.key)}
+          />
+          <div className="sidebar-bottom">
+            <span className="status-dot" /> 数据持久化存储
           </div>
-          <div className="user-menu">
-            <Tag color="green">
-              {user.role === "admin" ? "管理员" : "普通用户"}
-            </Tag>
-            <Avatar
-              size={30}
-              style={{ background: "#dcece6", color: "#195c4d" }}
-            >
-              {user.display_name.slice(0, 1)}
-            </Avatar>
-            <span className="user-name">{user.display_name}</span>
-            <Button type="text" onClick={() => setPasswordOpen(true)}>
-              改密
-            </Button>
-            <Button
-              type="text"
-              icon={<LogoutOutlined aria-hidden="true" />}
-              onClick={logout}
-              aria-label="退出登录"
-            />
-          </div>
-        </Header>
-        <nav className="mobile-nav">
-          {entries.map((e) => (
-            <button
-              className={page === e.key ? "selected" : ""}
-              key={e.key}
-              onClick={() => setPage(e.key)}
-            >
-              {e.icon}
-              {e.label}
-            </button>
-          ))}
-        </nav>
-        <Content className="workspace">
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">ACCOUNT MANAGER</div>
-              <h1>{selected[0]}</h1>
-              <p>{selected[1]}</p>
+        </Sider>
+        <Layout>
+          <Header className="topbar">
+            <div className="breadcrumb">
+              <span className="breadcrumb-parent">
+                工作空间 <span className="breadcrumb-separator">/</span>
+              </span>
+              {selected[0]}
             </div>
-            <div className="personal-quota">
-              <span>我的领用名额</span>
+            <div className="user-menu">
+              <Tag color="green">
+                {user.role === "admin" ? "管理员" : "普通用户"}
+              </Tag>
+              <Avatar
+                size={30}
+                style={{ background: "#dcece6", color: "#195c4d" }}
+              >
+                {user.display_name.slice(0, 1)}
+              </Avatar>
+              <span className="user-name">{user.display_name}</span>
+              <Button type="text" onClick={() => setPasswordOpen(true)}>
+                改密
+              </Button>
+              <Button
+                type="text"
+                icon={<LogoutOutlined aria-hidden="true" />}
+                onClick={logout}
+                aria-label="退出登录"
+              />
+            </div>
+          </Header>
+          <nav className="mobile-nav">
+            {entries.map((e) => (
+              <button
+                className={page === e.key ? "selected" : ""}
+                key={e.key}
+                onClick={() => setPage(e.key)}
+              >
+                {e.icon}
+                {e.label}
+              </button>
+            ))}
+          </nav>
+          <Content className="workspace">
+            <div className="page-heading">
               <div>
-                <strong>{user.claims_used}</strong>
-                <span> / {user.effective_claim_limit}</span>
+                <div className="eyebrow">ACCOUNT MANAGER</div>
+                <h1>{selected[0]}</h1>
+                <p>{selected[1]}</p>
               </div>
-              <small>
-                {Math.max(0, user.effective_claim_limit - user.claims_used)}{" "}
-                个可用名额
-              </small>
+              <div className="personal-quota">
+                <span>我的领用名额</span>
+                <div>
+                  <strong>{user.claims_used}</strong>
+                  <span> / {user.effective_claim_limit}</span>
+                </div>
+                <small>
+                  {Math.max(0, user.effective_claim_limit - user.claims_used)}{" "}
+                  个可用名额
+                </small>
+              </div>
             </div>
-          </div>
-          {sessionError && <Alert type="warning" message={sessionError} />}
-          {page === "pool" && (
-            <Pool user={user} epoch={epoch} refresh={refresh} />
-          )}
-          {page === "mine" && <MyClaims epoch={epoch} refresh={refresh} />}
-          {page === "history" && (
-            <MyClaims key="history" epoch={epoch} refresh={refresh} history />
-          )}
-          {user.role === "admin" && (
-            <>
-              {page === "dashboard" && (
-                <Dashboard epoch={epoch} refresh={refresh} />
-              )}
-              {page === "accounts" && (
-                <AdminAccounts user={user} epoch={epoch} refresh={refresh} />
-              )}
-              {page === "people" && <People epoch={epoch} refresh={refresh} />}
-              {page === "settings" && (
-                <SystemSettings epoch={epoch} refresh={refresh} />
-              )}
-              {page === "audit" && <AuditPage epoch={epoch} />}
-            </>
-          )}
-        </Content>
-        <footer className="footer">账号有序共享，使用状态及时同步。</footer>
+            {sessionError && <Alert type="warning" message={sessionError} />}
+            {page === "pool" && (
+              <Pool user={user} epoch={epoch} refresh={refresh} />
+            )}
+            {page === "mine" && <MyClaims epoch={epoch} refresh={refresh} />}
+            {page === "history" && (
+              <MyClaims key="history" epoch={epoch} refresh={refresh} history />
+            )}
+            {user.role === "admin" && (
+              <>
+                {page === "dashboard" && (
+                  <Dashboard epoch={epoch} refresh={refresh} />
+                )}
+                {page === "accounts" && (
+                  <AdminAccounts user={user} epoch={epoch} refresh={refresh} />
+                )}
+                {page === "people" && (
+                  <People epoch={epoch} refresh={refresh} />
+                )}
+                {page === "settings" && (
+                  <SystemSettings epoch={epoch} refresh={refresh} />
+                )}
+                {page === "audit" && <AuditPage epoch={epoch} />}
+              </>
+            )}
+          </Content>
+          <footer className="footer">账号有序共享，使用状态及时同步。</footer>
+        </Layout>
+        {passwordOpen && (
+          <Dialog
+            title="修改登录密码"
+            onClose={() => setPasswordOpen(false)}
+            onSubmit={async (v) => {
+              await api("/auth/password", "PUT", v);
+              setUser(null);
+              setCsrf("");
+              setPasswordOpen(false);
+            }}
+          >
+            <PasswordFields />
+          </Dialog>
+        )}
       </Layout>
-      {passwordOpen && (
-        <Dialog
-          title="修改登录密码"
-          onClose={() => setPasswordOpen(false)}
-          onSubmit={async (v) => {
-            await api("/auth/password", "PUT", v);
-            setUser(null);
-            setCsrf("");
-            setPasswordOpen(false);
-          }}
-        >
-          <PasswordFields />
-        </Dialog>
-      )}
-    </Layout>
+    </AccountOptionsProvider>
   );
 }
 function Brand() {

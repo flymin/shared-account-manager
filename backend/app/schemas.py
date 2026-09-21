@@ -1,10 +1,17 @@
 from datetime import datetime
 from typing import Annotated, Literal
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from uuid import uuid4
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from .password_policy import MIN_LENGTH, MAX_LENGTH
 from .plugins import default_mail_tool
 
 NewPassword = Annotated[str, Field(min_length=MIN_LENGTH, max_length=MAX_LENGTH)]
+OptionId = Annotated[
+    str, StringConstraints(min_length=1, max_length=64, strip_whitespace=True)
+]
+OptionName = Annotated[
+    str, StringConstraints(min_length=1, max_length=80, strip_whitespace=True)
+]
 
 
 class Input(BaseModel):
@@ -43,15 +50,61 @@ class GroupInput(Input):
     user_ids: list[str] | None = Field(default=None, max_length=10000)
 
 
+class AccountOption(Input):
+    id: OptionId = Field(default_factory=lambda: str(uuid4()))
+    name: OptionName
+    enabled: bool = Field(default=True, strict=True)
+
+    @field_validator("id")
+    @classmethod
+    def reserved_id(cls, value):
+        if value == "all":
+            raise ValueError("此标识为筛选保留值")
+        return value
+
+
+class AnomalyCategory(AccountOption):
+    cooldown_hours: int | None = Field(default=None, ge=1, le=8760, strict=True)
+
+
+class AccountOptions(Input):
+    tiers: list[AccountOption] = Field(min_length=1, max_length=50)
+    anomaly_categories: list[AnomalyCategory] = Field(max_length=50)
+
+    @field_validator("tiers", "anomaly_categories")
+    @classmethod
+    def unique_options(cls, values):
+        if len({v.id for v in values}) != len(values):
+            raise ValueError("选项标识不能重复")
+        if len({v.name.casefold() for v in values}) != len(values):
+            raise ValueError("选项名称不能重复")
+        return values
+
+    @field_validator("tiers")
+    @classmethod
+    def enabled_tier(cls, values):
+        if not any(v.enabled for v in values):
+            raise ValueError("至少需要一个启用的账号档位")
+        return values
+
+
 class SettingsInput(Input):
     user_claim_limit: int = Field(ge=1, le=1000)
     account_capacity: int = Field(ge=1, le=1000)
     observation_hours: int = Field(ge=1, le=8760)
     cooldown_hours: int = Field(ge=1, le=8760)
+    account_options: AccountOptions | None = None
     session_days: int = Field(ge=1, le=90)
     quota_depleted_threshold: int = Field(default=5, ge=1, le=100, strict=True)
     email_code_timeout_minutes: int = Field(default=5, ge=1, le=30, strict=True)
     quota_reset_interval_days: int = Field(default=7, ge=1, le=365, strict=True)
+
+    @field_validator("account_options")
+    @classmethod
+    def options_not_null(cls, value):
+        if value is None:
+            raise ValueError("账号选项配置不能为空")
+        return value
 
 
 class TimeInput(Input):
@@ -65,7 +118,7 @@ class TimeInput(Input):
 
 class ImportInput(TimeInput):
     text: str = Field(min_length=1, max_length=500000)
-    tier: Literal["5x", "20x"]
+    tier: OptionId
     mail_tool: str | None = Field(
         default_factory=default_mail_tool, min_length=1, max_length=64
     )
@@ -79,7 +132,7 @@ class ImportInput(TimeInput):
 
 
 class AccountPatch(TimeInput):
-    tier: Literal["5x", "20x"] | None = None
+    tier: OptionId | None = None
     mail_tool: str | None = Field(default=None, min_length=1, max_length=64)
     group_ids: list[str] | None = Field(default=None, max_length=100)
     user_ids: list[str] | None = Field(default=None, max_length=1000)
@@ -108,9 +161,7 @@ class QuotaInput(TimeInput):
 
 class HealthInput(Input):
     action: Literal["report", "clear"]
-    categories: list[Literal["at capacity", "降智"]] = Field(
-        default_factory=list, max_length=2
-    )
+    categories: list[OptionId] = Field(default_factory=list, max_length=50)
     note: str = Field(default="", max_length=2000)
     version: int = Field(ge=0)
 
@@ -119,9 +170,7 @@ class ReturnInput(TimeInput):
     kind: Literal["normal", "abnormal", "acknowledge"]
     quota: int | None = Field(default=None, ge=0, le=100)
     reset_at: datetime | None = None
-    categories: list[Literal["at capacity", "降智"]] = Field(
-        default_factory=list, max_length=2
-    )
+    categories: list[OptionId] = Field(default_factory=list, max_length=50)
     note: str = Field(default="", max_length=2000)
     health_action: Literal["maintain", "clear"] | None = None
     health_version: int | None = None

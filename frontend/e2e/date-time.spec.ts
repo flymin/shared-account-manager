@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import { defaultAccountOptions } from "./option-fixtures";
 
 // The serving deployment provides assets only; all business requests are mocked.
 async function openPicker(page: Page) {
@@ -33,6 +34,8 @@ async function openPicker(page: Page) {
   await page.route("**/api/v1/**", async (route) => {
     expect(route.request().method()).toBe("GET");
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/account-options"))
+      return route.fulfill({ json: defaultAccountOptions });
     const data = path.endsWith("/auth/me")
       ? {
           user: {

@@ -516,6 +516,57 @@ small {
 .settings-card button {
   margin-top: 10px;
 }
+.options-editor {
+  margin: 22px 0;
+  padding-top: 16px;
+  border-top: 1px solid #e8eeeb;
+}
+.options-editor h3 {
+  margin: 0 0 6px;
+}
+.option-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: start;
+  margin-top: 12px;
+  padding: 12px;
+  background: #f6f8f7;
+  border-radius: 8px;
+}
+.anomaly-option-row {
+  grid-template-columns: minmax(0, 1fr) 150px auto auto;
+}
+.settings-card .option-row .ant-form-item {
+  margin: 0;
+  min-width: 0;
+}
+.settings-card .option-row .option-remove {
+  margin-top: 30px;
+}
+.settings-card .option-row .ant-switch {
+  margin-top: 5px;
+}
+.option-help {
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+@media (max-width: 575px) {
+  .option-row,
+  .anomaly-option-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 10px;
+  }
+  .option-name {
+    grid-column: 1 / -1;
+  }
+  .option-row:not(.anomaly-option-row) .option-enabled {
+    grid-column: 2;
+  }
+  .settings-card .option-row .ant-form-item {
+    margin: 0;
+  }
+}
 .footer {
   padding: 12px 24px;
   color: #a3aea7;

@@ -79,6 +79,7 @@ export type Account = {
   mail_tool: string | null;
   mail_tool_name: string | null;
   tier: string;
+  tier_name?: string;
   disabled: boolean;
   created_at: string;
   expires_at: string | null;
@@ -92,6 +93,7 @@ export type Account = {
   quota_source: string | null;
   health: string;
   health_categories: string[];
+  health_category_names?: string[];
   health_note: string;
   health_version: number;
   can_claim: boolean;
@@ -129,11 +131,18 @@ export type Audit = {
   target_username?: string | null;
   target_display_name?: string | null;
 };
+export type AccountOption = { id: string; name: string; enabled: boolean };
+export type AnomalyCategory = AccountOption & { cooldown_hours: number | null };
+export type AccountOptions = {
+  tiers: AccountOption[];
+  anomaly_categories: AnomalyCategory[];
+};
 export type Settings = {
   user_claim_limit: number;
   account_capacity: number;
   observation_hours: number;
   cooldown_hours: number;
+  account_options: AccountOptions;
   session_days: number;
   quota_depleted_threshold: number;
   email_code_timeout_minutes: number;

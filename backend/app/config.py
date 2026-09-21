@@ -1,3 +1,4 @@
+import json
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -5,6 +6,12 @@ from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet
 from sqlalchemy.engine import URL
+
+
+def default_account_options():
+    """Seed new installations; runtime configuration lives in the database."""
+    path = Path(__file__).resolve().parent.parent / "config" / "account-options.json"
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def parse_public_origin(value: str) -> str:

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { defaultAccountOptions } from "./option-fixtures";
 
 // Every API request is intercepted. These fixtures never access an account,
 // mailbox, QR secret, or login session from the deployment serving the assets.
@@ -143,6 +144,7 @@ async function fixture(
       });
     const stamp = await page.evaluate(() => Date.now());
     const serverTime = new Date(stamp).toISOString();
+    if (path === "/account-options") return send(defaultAccountOptions);
     if (path === "/auth/me")
       return send({
         user: {

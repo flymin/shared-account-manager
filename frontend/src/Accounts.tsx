@@ -34,6 +34,7 @@ import {
 } from "./accountList";
 import { AccountStatusFilter } from "./AccountStatusFilter";
 import { MailToolField } from "./MailToolField";
+import { AnomalyField, TierField, useTierFilters } from "./AccountOptions";
 import {
   Credentials,
   CopyButton,
@@ -141,7 +142,7 @@ export function AccountDialog({
       okText={mode === "return" ? "确认归还" : "保存"}
     >
       <p className="modal-account">
-        {a.email} <Tag>{a.tier}</Tag>
+        {a.email} <Tag>{a.tier_name || a.tier}</Tag>
       </p>
       {mode === "return" && (
         <Form.Item name="kind">
@@ -181,16 +182,7 @@ export function AccountDialog({
             showIcon
             message="选择异常类别或填写问题，至少填写一项。"
           />
-          <Form.Item name="categories" label="异常类别">
-            <Select
-              mode="multiple"
-              options={["at capacity", "降智"].map((value) => ({
-                value,
-                label: value,
-              }))}
-              placeholder="选择类别"
-            />
-          </Form.Item>
+          <AnomalyField />
           <Form.Item name="note" label="异常描述">
             <Input.TextArea
               rows={3}
@@ -213,11 +205,7 @@ export function AccountDialog({
       )}
       {mode === "edit" && (
         <>
-          <Form.Item name="tier" label="账号档位" rules={required}>
-            <Select
-              options={["5x", "20x"].map((value) => ({ value, label: value }))}
-            />
-          </Form.Item>
+          <TierField current={a.tier} />
           <Form.Item name="capacity" label="同时领用人数（留空沿用全局）">
             <InputNumber min={1} max={1000} />
           </Form.Item>
@@ -292,6 +280,7 @@ export function Pool({
     adminMode ? "/accounts" : "/accounts?scope=hall",
     epoch,
   );
+  const tierFilters = useTierFilters();
   const { message, modal } = App.useApp();
   const [q, setQ] = useState(""),
     [tier, setTier] = useState("all"),
@@ -381,7 +370,7 @@ export function Pool({
         title: "此账号存在异常，仍要领用吗？",
         content: (
           <>
-            <p>{a.health_categories.join("、")}</p>
+            <p>{(a.health_category_names || a.health_categories).join("、")}</p>
             <p>{a.health_note}</p>
             <p>领用后可登录测试并主动确认恢复。</p>
           </>
@@ -561,11 +550,7 @@ export function Pool({
               setTier(value);
               setCurrentPage(1);
             }}
-            options={[
-              { value: "all", label: "全部档位" },
-              { value: "5x", label: "5x" },
-              { value: "20x", label: "20x" },
-            ]}
+            options={tierFilters}
           />
           <AccountStatusFilter
             value={statuses}
@@ -680,7 +665,7 @@ export function Pool({
                     <CopyButton value={a.email} label="账号邮箱" />
                   </div>
                   <div className="account-meta">
-                    <Tag className="tier-tag">{a.tier}</Tag>
+                    <Tag className="tier-tag">{a.tier_name || a.tier}</Tag>
                     <small className="muted">启用 {fmt(a.created_at)}</small>
                   </div>
                   {adminMode && (
@@ -738,7 +723,9 @@ export function Pool({
                 <>
                   <Health a={a} />
                   <div className="muted small">
-                    {a.health_categories.join(" · ")}
+                    {(a.health_category_names || a.health_categories).join(
+                      " · ",
+                    )}
                   </div>
                 </>
               ),
@@ -801,7 +788,7 @@ export function Pool({
           <Card key={a.id} className="account-card">
             <div className="card-top">
               <strong>{a.email}</strong>
-              <Tag className="tier-tag">{a.tier}</Tag>
+              <Tag className="tier-tag">{a.tier_name || a.tier}</Tag>
             </div>
             <Health a={a} />
             {adminMode && (
@@ -965,7 +952,11 @@ export function MyClaims({
                     ? "账号已删除"
                     : "账号已回收")}
               </strong>
-              {c.account && <Tag className="tier-tag">{c.account.tier}</Tag>}
+              {c.account && (
+                <Tag className="tier-tag">
+                  {c.account.tier_name || c.account.tier}
+                </Tag>
+              )}
             </div>
             <p className="small muted">
               领用 {fmt(c.claimed_at)}
@@ -986,7 +977,10 @@ export function MyClaims({
                 <Health a={c.account} />
                 {c.account.health_note && (
                   <p className="anomaly-note">
-                    {c.account.health_categories.join("、")}{" "}
+                    {(
+                      c.account.health_category_names ||
+                      c.account.health_categories
+                    ).join("、")}{" "}
                     {c.account.health_note}
                   </p>
                 )}

@@ -25,6 +25,55 @@ def settings(db):
     return db.get(Settings, 1)
 
 
+def option_name(cfg, kind, identity):
+    return next(
+        (item["name"] for item in cfg.account_options[kind] if item["id"] == identity),
+        identity,
+    )
+
+
+def validate_tier(db, identity, current=None):
+    if identity is not None and identity == current:
+        return  # Existing accounts may retain a disabled tier.
+    if not any(
+        item["id"] == identity and item["enabled"]
+        for item in settings(db).account_options["tiers"]
+    ):
+        fail("请选择当前启用的账号档位", 422)
+
+
+def validate_categories(db, categories):
+    enabled = {
+        item["id"]
+        for item in settings(db).account_options["anomaly_categories"]
+        if item["enabled"]
+    }
+    if not set(categories) <= enabled:
+        fail("异常类别已变更，请选择当前启用的类别或填写异常描述", 422)
+
+
+def validate_options_update(db, options):
+    # Preserve references, including soft-deleted accounts and inactive anomalies.
+    tiers = {item["id"] for item in options["tiers"]}
+    if db.scalar(select(Account.id).where(Account.tier.not_in(tiers)).limit(1)):
+        fail("不能删除已被账号使用的档位，请改为停用", 422)
+    categories = {item["id"] for item in options["anomaly_categories"]}
+    for used in db.scalars(select(Account.health_categories).distinct()):
+        if not set(used) <= categories:
+            fail("不能删除仍被异常记录使用的类别，请改为停用", 422)
+
+
+def anomaly_cooldown_hours(cfg, categories):
+    intervals = {
+        item["id"]: item["cooldown_hours"] or cfg.cooldown_hours
+        for item in cfg.account_options["anomaly_categories"]
+    }
+    return max(
+        (intervals.get(identity, cfg.cooldown_hours) for identity in categories),
+        default=cfg.cooldown_hours,
+    )
+
+
 def quota_depleted(quota, cfg):
     return quota is not None and quota < cfg.quota_depleted_threshold
 
@@ -240,6 +289,7 @@ def account_dto(db, user, a, stamp=None):
         mail_tool=a.mail_tool,
         mail_tool_name=mail_tool_name(a.mail_tool),
         tier=a.tier,
+        tier_name=option_name(cfg, "tiers", a.tier),
         disabled=a.disabled,
         created_at=a.created_at,
         expires_at=a.expires_at,
@@ -253,6 +303,10 @@ def account_dto(db, user, a, stamp=None):
         quota_source=a.quota_source,
         health=a.health,
         health_categories=a.health_categories,
+        health_category_names=[
+            option_name(cfg, "anomaly_categories", identity)
+            for identity in a.health_categories
+        ],
         health_note=a.health_note,
         health_version=a.health_version,
         anomaly_since=a.anomaly_since,
@@ -310,7 +364,12 @@ def claim_dto(db, user, claim):
         )
     if not claim.invalidated_at and not a.deleted:
         if claim.returned_at:
-            result["account"] = {"id": a.id, "email": a.email, "tier": a.tier}
+            result["account"] = {
+                "id": a.id,
+                "email": a.email,
+                "tier": a.tier,
+                "tier_name": option_name(settings(db), "tiers", a.tier),
+            }
         else:
             result["account"] = account_dto(db, user, a)
     else:
@@ -371,7 +430,9 @@ def update_quota(db, a, actor, quota, reset_at, replace_reset=True):
     )
 
 
-def health_report(db, a, actor, categories, note):
+def health_report(db, a, actor, categories, note, *, maintain=False):
+    if not maintain:
+        validate_categories(db, categories)
     note = note.strip()
     if not categories and not note:
         fail("请选择异常类别或填写异常问题", 422)
@@ -387,7 +448,15 @@ def health_report(db, a, actor, categories, note):
         "health_reported",
         actor,
         a,
-        {"categories": a.health_categories, "note": note, "version": a.health_version},
+        {
+            "categories": a.health_categories,
+            "category_names": [
+                option_name(settings(db), "anomaly_categories", identity)
+                for identity in a.health_categories
+            ],
+            "note": note,
+            "version": a.health_version,
+        },
     )
 
 
@@ -442,7 +511,9 @@ def return_claim(db, user, claim_id, data):
             if data.health_action == "clear":
                 clear_health(db, a, user)
             elif data.health_action == "maintain" and a.health != "normal":
-                health_report(db, a, user, a.health_categories, a.health_note)
+                health_report(
+                    db, a, user, a.health_categories, a.health_note, maintain=True
+                )
         else:
             health_report(db, a, user, data.categories, data.note)
         c.return_kind = data.kind
@@ -483,6 +554,7 @@ def mail_tool_name(identity):
 
 
 def parse_import(db, data):
+    validate_tier(db, data.tier)
     validate_mail_tool(data.mail_tool)
     errors, rows, seen = [], [], set()
     lines = data.text.splitlines()
@@ -547,6 +619,7 @@ def import_accounts(db, user, data):
             a,
             {
                 "tier": data.tier,
+                "tier_name": option_name(settings(db), "tiers", data.tier),
                 "mail_tool": data.mail_tool,
                 "quota_reset_interval_days": data.quota_reset_interval_days,
             },
@@ -570,7 +643,11 @@ def reconcile(db, stamp=None):
         settle_quota_reset(db, a, stamp)
         if a.health != "abnormal" or not a.anomaly_since:
             continue
-        cooled = a.anomaly_since + timedelta(hours=cfg.cooldown_hours) <= stamp
+        cooled = (
+            a.anomaly_since
+            + timedelta(hours=anomaly_cooldown_hours(cfg, a.health_categories))
+            <= stamp
+        )
         observed = db.scalar(
             select(Claim.id).where(
                 Claim.account_id == a.id,

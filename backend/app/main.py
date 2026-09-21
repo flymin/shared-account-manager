@@ -229,6 +229,7 @@ def preview_import(
                 "line": row[0],
                 "email": row[1],
                 "tier": data.tier,
+                "tier_name": d.option_name(d.settings(db), "tiers", data.tier),
                 "mail_tool": data.mail_tool,
                 "mail_tool_name": d.mail_tool_name(data.mail_tool),
             }
@@ -255,6 +256,8 @@ def update_account(
 ):
     a = d.get_account(db, user, account_id)
     values = data.model_dump(exclude_unset=True)
+    if "tier" in values:
+        d.validate_tier(db, data.tier, current=a.tier)
     if "mail_tool" in values:
         d.validate_mail_tool(data.mail_tool)
     if ("mail_tool" in values and a.mail_tool != data.mail_tool) or values.get(
@@ -270,8 +273,6 @@ def update_account(
         "quota_reset_interval_days",
     ):
         if field in values:
-            if field == "tier" and values[field] is None:
-                d.fail("档位不能为空", 422)
             setattr(a, field, values[field])
     for field, dest in (
         ("password", "password_encrypted"),
@@ -369,7 +370,7 @@ def claims(
     limit: int = Query(100, ge=1, le=1000),
     q: str = Query("", max_length=254),
     state: str = Query("all", pattern="^(all|active|pending)$"),
-    tier: str | None = Query(None, pattern="^(5x|20x)$"),
+    tier: str | None = Query(None, min_length=1, max_length=64),
     group_id: str | None = None,
 ):
     query = (
@@ -619,6 +620,14 @@ def delete_group(
     return {"ok": True}
 
 
+@app.get("/api/v1/account-options")
+def account_options(
+    user=Depends(auth.authenticate), db=Depends(get_db, scope="function")
+):
+    cfg = d.settings(db)
+    return {**cfg.account_options, "cooldown_hours": cfg.cooldown_hours}
+
+
 @app.get("/api/v1/settings")
 def get_settings(user=Depends(auth.admin), db=Depends(get_db, scope="function")):
     return {
@@ -634,6 +643,10 @@ def put_settings(
 ):
     cfg = d.settings(db)
     changes = data.model_dump(exclude_unset=True)
+    if "account_options" in changes:
+        # Preserve generated identifiers and nested defaults for newly added options.
+        changes["account_options"] = data.account_options.model_dump()
+        d.validate_options_update(db, changes["account_options"])
     for key, value in changes.items():
         setattr(cfg, key, value)
     d.event(db, "settings_updated", user, details=changes)
