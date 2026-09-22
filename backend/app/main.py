@@ -10,6 +10,7 @@ from .models import (
     Group,
     UserGroup,
     Account,
+    AccountNote,
     AccountGroup,
     AccountUser,
     Claim,
@@ -211,6 +212,55 @@ def events(
         d.serialize_event(db, e)
         for e in db.scalars(query.order_by(Event.id.desc()).limit(limit))
     ]
+
+
+def note_dto(note, author):
+    return {
+        "id": note.id,
+        "content": note.content,
+        "created_at": note.created_at,
+        "author_name": author.display_name,
+        "author_username": author.username,
+    }
+
+
+@app.get("/api/v1/accounts/{account_id}/notes")
+def account_notes(
+    account_id: str,
+    user=Depends(auth.authenticate),
+    db=Depends(get_db, scope="function"),
+    before: int | None = Query(None, ge=1),
+    limit: int = Query(50, ge=1, le=100),
+):
+    d.get_account(db, user, account_id)
+    query = (
+        select(AccountNote, User)
+        .join(User, User.id == AccountNote.author_id)
+        .where(AccountNote.account_id == account_id)
+    )
+    if before is not None:
+        query = query.where(AccountNote.id < before)
+    return [
+        note_dto(note, author)
+        for note, author in db.execute(
+            query.order_by(AccountNote.id.desc()).limit(limit)
+        )
+    ]
+
+
+@app.post("/api/v1/accounts/{account_id}/notes", status_code=201)
+def add_account_note(
+    account_id: str,
+    data: s.AccountNoteInput,
+    user=Depends(auth.authenticate),
+    db=Depends(get_db, scope="function"),
+):
+    account = d.get_account(db, user, account_id, feedback=True)
+    note = AccountNote(account_id=account.id, author_id=user.id, content=data.content)
+    db.add(note)
+    db.flush()
+    d.event(db, "account_note_added", user, account, {"note_id": note.id})
+    return note_dto(note, user)
 
 
 @app.get("/api/v1/mail-tools")

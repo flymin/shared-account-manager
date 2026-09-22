@@ -1,3 +1,4 @@
+import { AccountNotes } from "./AccountNotes";
 import { DateTimeInput, dateTimeRule } from "./DateTimeInput";
 import { useEffect, useState, type ReactNode } from "react";
 import {
@@ -721,7 +722,16 @@ export function Pool({
               width: 130,
               render: (_, a) => (
                 <>
-                  <Health a={a} />
+                  <span className="account-status-with-notes">
+                    <Health a={a} />
+                    <AccountNotes
+                      accountId={a.id}
+                      count={a.note_count}
+                      epoch={epoch}
+                      refresh={refresh}
+                      canAdd={adminMode}
+                    />
+                  </span>
                   <div className="muted small">
                     {(a.health_category_names || a.health_categories).join(
                       " · ",
@@ -790,7 +800,16 @@ export function Pool({
               <strong>{a.email}</strong>
               <Tag className="tier-tag">{a.tier_name || a.tier}</Tag>
             </div>
-            <Health a={a} />
+            <span className="account-status-with-notes">
+              <Health a={a} />
+              <AccountNotes
+                accountId={a.id}
+                count={a.note_count}
+                epoch={epoch}
+                refresh={refresh}
+                canAdd={adminMode}
+              />
+            </span>
             {adminMode && (
               <div className="account-access-meta">
                 <div>
@@ -850,7 +869,16 @@ export function Pool({
         {currentDetail ? (
           <>
             <h3 className="break-word">{currentDetail.email}</h3>
-            <Health a={currentDetail} />
+            <span className="account-status-with-notes">
+              <Health a={currentDetail} />
+              <AccountNotes
+                accountId={currentDetail.id}
+                count={currentDetail.note_count}
+                epoch={epoch}
+                refresh={refresh}
+                canAdd={adminMode}
+              />
+            </span>
             <p className="muted">
               启用 {fmt(currentDetail.created_at)} ·{" "}
               {currentDetail.expires_at
@@ -872,6 +900,18 @@ export function Pool({
                 epoch={epoch}
                 manageTwoFactor={adminMode && user.role === "admin"}
               />
+            )}
+            {adminMode && (
+              <div className="account-notes-entry">
+                <AccountNotes
+                  accountId={currentDetail.id}
+                  count={currentDetail.note_count}
+                  epoch={epoch}
+                  refresh={refresh}
+                  canAdd
+                  entry
+                />
+              </div>
             )}
             <h3>更新记录</h3>
             <EventHistory accountId={currentDetail.id} epoch={epoch} />
@@ -974,7 +1014,15 @@ export function MyClaims({
               </Tag>
             ) : c.account ? (
               <>
-                <Health a={c.account} />
+                <span className="account-status-with-notes">
+                  <Health a={c.account} />
+                  <AccountNotes
+                    accountId={c.account.id}
+                    count={c.account.note_count}
+                    epoch={epoch}
+                    refresh={refresh}
+                  />
+                </span>
                 {c.account.health_note && (
                   <p className="anomaly-note">
                     {(
@@ -987,6 +1035,14 @@ export function MyClaims({
                 <Quota a={c.account} />
                 <Credentials accountId={c.account.id} epoch={epoch} />
                 <div className="claim-actions">
+                  <AccountNotes
+                    accountId={c.account.id}
+                    count={c.account.note_count}
+                    epoch={epoch}
+                    refresh={refresh}
+                    canAdd
+                    entry
+                  />
                   <Button
                     type="primary"
                     onClick={() =>

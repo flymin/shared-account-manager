@@ -101,6 +101,22 @@ class Account(Base):
     )
 
 
+class AccountNote(Base):
+    __tablename__ = "account_notes"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"))
+    author_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_account_notes_account_id_id", "account_id", "id"),
+        CheckConstraint(
+            "char_length(content) BETWEEN 1 AND 200",
+            name="account_notes_content_length",
+        ),
+    )
+
+
 class AccountGroup(Base):
     __tablename__ = "account_groups"
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), primary_key=True)

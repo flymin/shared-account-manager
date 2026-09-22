@@ -5,6 +5,7 @@ from sqlalchemy import select, delete, func, or_
 from .config import cipher
 from .models import (
     Account,
+    AccountNote,
     AccountGroup,
     AccountUser,
     UserGroup,
@@ -286,6 +287,11 @@ def account_dto(db, user, a, stamp=None):
     result = dict(
         id=a.id,
         email=a.email,
+        note_count=db.scalar(
+            select(func.count())
+            .select_from(AccountNote)
+            .where(AccountNote.account_id == a.id)
+        ),
         mail_tool=a.mail_tool,
         mail_tool_name=mail_tool_name(a.mail_tool),
         tier=a.tier,

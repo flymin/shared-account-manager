@@ -73,7 +73,15 @@ export type Person = {
   group_ids: string[];
 };
 export type Group = { id: string; name: string; user_ids: string[] };
+export type AccountNote = {
+  id: number;
+  content: string;
+  created_at: string;
+  author_name: string;
+  author_username: string;
+};
 export type Account = {
+  note_count: number;
   id: string;
   email: string;
   mail_tool: string | null;

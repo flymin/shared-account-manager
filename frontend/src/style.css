@@ -1343,3 +1343,40 @@ small {
   margin-bottom: 0;
   font-size: 12px;
 }
+
+.account-status-with-notes {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.account-notes-icon {
+  color: #507966;
+}
+.account-notes-preview {
+  width: min(330px, calc(100vw - 56px));
+  max-height: 380px;
+  overflow-y: auto;
+}
+.account-notes-list article {
+  padding: 10px 0;
+  border-bottom: 1px solid #e9efeb;
+}
+.account-note-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0 0 5px;
+}
+.account-notes-list .small {
+  overflow-wrap: anywhere;
+}
+.account-notes-panel > .ant-form {
+  margin: 12px 0 16px;
+}
+.account-notes-panel > .ant-btn,
+.account-notes-panel > .ant-spin {
+  margin-top: 12px;
+}
+.account-notes-entry {
+  margin: 12px 0;
+}

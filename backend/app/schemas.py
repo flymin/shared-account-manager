@@ -178,3 +178,9 @@ class ReturnInput(TimeInput):
 
 class RevokeInput(Input):
     reason: str = Field(min_length=1, max_length=2000)
+
+
+class AccountNoteInput(Input):
+    content: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+    ]
