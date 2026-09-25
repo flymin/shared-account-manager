@@ -660,7 +660,7 @@ export function Pool({
               sorter: true,
               sortDirections: ["ascend", "descend", "ascend"],
               sortOrder: sort?.key === "email" ? sort.order : null,
-              width: 304,
+              width: adminMode ? 304 : 220,
               render: (_, a) => (
                 <>
                   <div className="account-email">
