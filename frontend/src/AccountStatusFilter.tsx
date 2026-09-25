@@ -4,24 +4,35 @@ import { DownOutlined } from "@ant-design/icons";
 import {
   ACCOUNT_STATUSES,
   ALL_ACCOUNT_STATUSES,
+  DISABLED_ACCOUNT_STATUS,
   type AccountStatus,
 } from "./accountList";
 
 export function AccountStatusFilter({
   value,
   onChange,
+  includeDisabled = false,
 }: {
   value: AccountStatus[];
   onChange: (value: AccountStatus[]) => void;
+  includeDisabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const all = value.length === ALL_ACCOUNT_STATUSES.length;
+  const options = includeDisabled
+    ? [...ACCOUNT_STATUSES, DISABLED_ACCOUNT_STATUS]
+    : ACCOUNT_STATUSES;
+  const allStatuses = includeDisabled
+    ? [...ALL_ACCOUNT_STATUSES, DISABLED_ACCOUNT_STATUS.value]
+    : ALL_ACCOUNT_STATUSES;
+  const all =
+    value.length === allStatuses.length &&
+    allStatuses.every((status) => value.includes(status));
   const summary = all
     ? "全部状态"
     : value.length === 0
       ? "未选择状态"
       : value.length === 1
-        ? ACCOUNT_STATUSES.find((s) => s.value === value[0])!.label
+        ? options.find((s) => s.value === value[0])!.label
         : `已选 ${value.length} 种状态`;
   return (
     <Popover
@@ -36,7 +47,7 @@ export function AccountStatusFilter({
               checked={all}
               indeterminate={value.length > 0 && !all}
               onChange={(event) =>
-                onChange(event.target.checked ? [...ALL_ACCOUNT_STATUSES] : [])
+                onChange(event.target.checked ? [...allStatuses] : [])
               }
             >
               全选
@@ -48,10 +59,10 @@ export function AccountStatusFilter({
           <Checkbox.Group
             value={value}
             onChange={(selected) => onChange(selected as AccountStatus[])}
-            options={ACCOUNT_STATUSES.map((s) => ({ ...s }))}
+            options={options.map((s) => ({ ...s }))}
           />
           <p className="small muted">
-            多选展示所选类别；每个账号按异常、可能恢复、额度已耗尽、人数已满、正常的顺序归入一类。
+            多选展示所选类别；停用账号单独归入“已停用”，其他账号按异常、可能恢复、额度已耗尽、人数已满、正常归类。
           </p>
         </div>
       }

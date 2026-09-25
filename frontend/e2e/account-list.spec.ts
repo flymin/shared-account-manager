@@ -456,6 +456,50 @@ test("五种状态默认全选，单选、多选和取消某类互不重复", as
   await expect(page.locator(".list-caption strong")).toHaveText("6");
 });
 
+test("管理员状态筛选包含已停用，且停用标签不改变行高", async ({ page }) => {
+  await openFixture(page, false, accounts, 5, true);
+  const statusFilter = page.getByRole("button", {
+    name: "筛选状态",
+    exact: true,
+  });
+  await statusFilter.click();
+  const panel = page.locator(".status-filter-panel");
+  await expect(panel.getByRole("checkbox")).toHaveCount(7);
+  await expect(
+    panel.getByRole("checkbox", { name: "已停用", exact: true }),
+  ).toBeChecked();
+
+  if (await page.locator(".mobile-nav").isVisible()) {
+    const stopped = page
+      .locator(".mobile-cards .account-card")
+      .filter({ hasText: "stopped@example.test" });
+    const normal = page
+      .locator(".mobile-cards .account-card")
+      .filter({ hasText: "alpha@example.test" });
+    expect((await stopped.boundingBox())!.height).toBe(
+      (await normal.boundingBox())!.height,
+    );
+  } else {
+    const stopped = page
+      .locator(".desktop-table .ant-table-row")
+      .filter({ hasText: "stopped@example.test" });
+    const normal = page
+      .locator(".desktop-table .ant-table-row")
+      .filter({ hasText: "alpha@example.test" });
+    expect((await stopped.boundingBox())!.height).toBe(
+      (await normal.boundingBox())!.height,
+    );
+    expect(
+      (await page.getByRole("columnheader", { name: /^账号$/ }).boundingBox())!
+        .width,
+    ).toBeGreaterThanOrEqual(300);
+  }
+
+  await panel.getByRole("button", { name: "清空", exact: true }).click();
+  await panel.getByRole("checkbox", { name: "已停用", exact: true }).check();
+  await expect.poll(() => rows(page)).toEqual(["stopped@example.test"]);
+});
+
 test("领用按钮下方优先提示个人名额已满", async ({ page }) => {
   await openFixture(page, true);
   const container = (await page.locator(".mobile-nav").isVisible())

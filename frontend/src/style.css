@@ -323,6 +323,11 @@ small {
   font-weight: 600;
   word-break: break-word;
 }
+.account-disabled-tag {
+  margin-inline-end: 0 !important;
+  padding-inline: 6px !important;
+  line-height: 20px !important;
+}
 .tier-tag {
   color: #22684d !important;
   background: #eaf4ed !important;

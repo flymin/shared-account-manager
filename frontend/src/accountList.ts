@@ -7,12 +7,23 @@ export const ACCOUNT_STATUSES = [
   { value: "full", label: "人数已满" },
   { value: "normal", label: "正常" },
 ] as const;
-export type AccountStatus = (typeof ACCOUNT_STATUSES)[number]["value"];
+export const DISABLED_ACCOUNT_STATUS = {
+  value: "disabled",
+  label: "已停用",
+} as const;
+export type AccountStatus =
+  | (typeof ACCOUNT_STATUSES)[number]["value"]
+  | (typeof DISABLED_ACCOUNT_STATUS)["value"];
 export const ALL_ACCOUNT_STATUSES: AccountStatus[] = ACCOUNT_STATUSES.map(
   (s) => s.value,
 );
+export const ALL_ADMIN_ACCOUNT_STATUSES: AccountStatus[] = [
+  ...ALL_ACCOUNT_STATUSES,
+  DISABLED_ACCOUNT_STATUS.value,
+];
 
 export function accountStatus(a: Account): AccountStatus {
+  if (a.disabled) return DISABLED_ACCOUNT_STATUS.value;
   if (a.health === "abnormal" || a.health === "possibly_recovered")
     return a.health;
   if (a.quota_depleted) return "empty";

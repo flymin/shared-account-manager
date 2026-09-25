@@ -29,6 +29,7 @@ import {
   accountStatus,
   isInAccountHall,
   ALL_ACCOUNT_STATUSES,
+  ALL_ADMIN_ACCOUNT_STATUSES,
   compareAccounts,
   type AccountSort,
   type AccountStatus,
@@ -286,7 +287,7 @@ export function Pool({
   const [q, setQ] = useState(""),
     [tier, setTier] = useState("all"),
     [statuses, setStatuses] = useState<AccountStatus[]>(() => [
-      ...ALL_ACCOUNT_STATUSES,
+      ...(adminMode ? ALL_ADMIN_ACCOUNT_STATUSES : ALL_ACCOUNT_STATUSES),
     ]),
     [group, setGroup] = useState("all");
   const [sort, setSort] = useState<AccountSort | undefined>(() =>
@@ -555,6 +556,7 @@ export function Pool({
           />
           <AccountStatusFilter
             value={statuses}
+            includeDisabled={adminMode}
             onChange={(value) => {
               setStatuses(value);
               setCurrentPage(1);
@@ -658,7 +660,7 @@ export function Pool({
               sorter: true,
               sortDirections: ["ascend", "descend", "ascend"],
               sortOrder: sort?.key === "email" ? sort.order : null,
-              width: 220,
+              width: 304,
               render: (_, a) => (
                 <>
                   <div className="account-email">

@@ -27,7 +27,11 @@ import {
   type Account,
   type Audit,
 } from "./api";
-import { accountStatus, ACCOUNT_STATUSES } from "./accountList";
+import {
+  accountStatus,
+  ACCOUNT_STATUSES,
+  DISABLED_ACCOUNT_STATUS,
+} from "./accountList";
 import { Verification } from "./Verification";
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -96,9 +100,17 @@ export function useResource<T>(path: string, epoch: number) {
 }
 export function Health({ a }: { a: Account }) {
   const status = accountStatus(a);
+  if (status === DISABLED_ACCOUNT_STATUS.value) {
+    return (
+      <Space className="account-health" size={4}>
+        <Tag className="account-disabled-tag" color="default">
+          {DISABLED_ACCOUNT_STATUS.label}
+        </Tag>
+      </Space>
+    );
+  }
   return (
     <Space className="account-health" size={4} wrap>
-      {a.disabled && <Tag color="default">已停用</Tag>}
       <Tag
         color={
           status === "normal"
