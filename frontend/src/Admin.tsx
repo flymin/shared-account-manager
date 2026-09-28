@@ -1,5 +1,5 @@
 import { DateTimeInput, dateTimeRule } from "./DateTimeInput";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   PASSWORD_HINT,
   PASSWORD_MIN_LENGTH,
@@ -21,9 +21,14 @@ import {
   Tag,
   Tabs,
 } from "antd";
-import { PlusOutlined, UploadOutlined } from "@ant-design/icons";
+import {
+  DownloadOutlined,
+  PlusOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
 import {
   api,
+  getSessionVersion,
   type Account,
   type Claim,
   type Person,
@@ -52,6 +57,41 @@ export function AdminAccounts({
   const { data: groups = [] } = useResource<Group[]>("/groups", epoch),
     { data: users = [] } = useResource<Person[]>("/users", epoch);
   const [importOpen, setImportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const exportRequest = useRef<AbortController | null>(null);
+  const { message } = App.useApp();
+  useEffect(() => () => exportRequest.current?.abort(), []);
+  async function downloadAccountExport() {
+    if (exportRequest.current) return;
+    const controller = new AbortController();
+    exportRequest.current = controller;
+    const session = getSessionVersion();
+    setExporting(true);
+    try {
+      const csv = await api<Blob>("/accounts/export.csv", "GET", undefined, {
+        signal: controller.signal,
+        responseType: "blob",
+      });
+      if (controller.signal.aborted || session !== getSessionVersion()) return;
+      const url = URL.createObjectURL(csv);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "account-export.csv";
+      document.body.appendChild(link);
+      try {
+        link.click();
+      } finally {
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted && session === getSessionVersion())
+        message.error((error as Error).message);
+    } finally {
+      exportRequest.current = null;
+      if (!controller.signal.aborted) setExporting(false);
+    }
+  }
   return (
     <>
       <Pool
@@ -62,16 +102,27 @@ export function AdminAccounts({
         groups={groups}
         users={users}
         toolbar={
-          <Button
-            type="primary"
-            icon={<UploadOutlined aria-hidden="true" />}
-            aria-label="批量登记账号"
-            onClick={() => setImportOpen(true)}
-          >
-            <span>
-              批量登记<span className="desktop-only-text">账号</span>
-            </span>
-          </Button>
+          <Space size={8}>
+            <Button
+              icon={<DownloadOutlined aria-hidden="true" />}
+              aria-label="导出账号 CSV"
+              title="导出全部未删除账号，包含登录密码和邮箱密码"
+              loading={exporting}
+              onClick={downloadAccountExport}
+            >
+              导出账号
+            </Button>
+            <Button
+              type="primary"
+              icon={<UploadOutlined aria-hidden="true" />}
+              aria-label="批量登记账号"
+              onClick={() => setImportOpen(true)}
+            >
+              <span>
+                批量登记<span className="desktop-only-text">账号</span>
+              </span>
+            </Button>
+          </Space>
         }
       />
       {importOpen && (
@@ -154,7 +205,7 @@ function ImportDialog({
               rows={6}
               autoComplete="off"
               spellCheck={false}
-              placeholder="账号邮箱----账号密码----邮箱密码"
+              placeholder="账号邮箱----邮箱密码\n或账号邮箱----账号密码----邮箱密码"
               maxLength={500000}
             />
           </Form.Item>

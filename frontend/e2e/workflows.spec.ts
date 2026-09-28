@@ -318,7 +318,7 @@ test("管理员通过界面创建组、用户并预览导入与编辑账号", as
     .fill(`${email}----UI-Test-Password!----UI-Test-Auth!\ninvalid`);
   await page.getByRole("button", { name: "检查并预览" }).click();
   await expect(
-    page.getByText("第 2 行：需要三段内容，以 ---- 分隔"),
+    page.getByText("第 2 行：需要两段或三段内容，以 ---- 分隔"),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "确认整批导入" }),
@@ -439,8 +439,7 @@ test("邮箱取码工具关闭后领用者不能自动取码，管理员可恢�
     page.getByRole("button", { name: "获取邮箱验证码", exact: true }),
   ).toBeEnabled();
   expect(
-    (await adminApi("/accounts")).find((a: any) => a.email === email)
-      .mail_tool,
+    (await adminApi("/accounts")).find((a: any) => a.email === email).mail_tool,
   ).toBe("mailcom");
 });
 

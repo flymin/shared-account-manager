@@ -19,7 +19,12 @@ export async function api<T = any>(
   path: string,
   method = "GET",
   data?: unknown,
-  options: { signal?: AbortSignal; keepalive?: boolean; binary?: boolean } = {},
+  options: {
+    signal?: AbortSignal;
+    keepalive?: boolean;
+    binary?: boolean;
+    responseType?: "blob";
+  } = {},
 ): Promise<T> {
   const startedSession = sessionVersion;
   const response = await fetch("/api/v1" + path, {
@@ -45,6 +50,11 @@ export async function api<T = any>(
     if (e.name === "AbortError") throw e;
     throw new Error("暂时无法连接服务，请检查网络后重试");
   });
+  if (response.ok && options.responseType === "blob") {
+    if (!response.headers.get("Content-Type")?.startsWith("text/csv"))
+      throw new Error("导出失败，请刷新页面后重试");
+    return (await response.blob()) as T;
+  }
   const body = await response
     .json()
     .catch(() => ({ detail: "服务暂时不可用，请稍后重试" }));

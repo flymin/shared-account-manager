@@ -49,6 +49,10 @@ flowchart LR
 
 `GET /api/v1/accounts?scope=hall` 返回未停用且未过期的授权账号；默认列表保留停用与过期条目。管理员通过 `PUT /api/v1/accounts/{id}/activation` 和 `{"enabled": false}` 停用账号，使用 `true` 恢复，重复调用不会重复生成状态变更历史。
 
+管理员通过 `POST /api/v1/account-imports/preview` 预览、`POST /api/v1/account-imports` 写入账号。导入文本每行支持 `账号邮箱----邮箱密码` 或 `账号邮箱----账号密码----邮箱密码`；两段格式会将邮箱密码同时加密保存为两段凭据。
+
+管理员可通过 `GET /api/v1/accounts/export.csv` 下载全部未删除账号的 UTF-8 CSV。响应包含账号邮箱、两段凭据、账号类别、停用状态、账号 2FA 是否已配置和北京时间到期时间；服务端不返回已删除账号，并记录 `accounts_exported` 审计事件。该接口只接受管理员会话。
+
 管理员通过 `GET /api/v1/mail-tools` 获取已注册取码工具的选项和默认值。账号导入、导入预览与编辑支持 `mail_tool`：工具 ID 表示启用，显式 `null` 表示不启用；导入省略该字段使用配置的默认工具，编辑省略该字段保留原值。未知 ID 拒绝写入，账号响应包含 `mail_tool` 与 `mail_tool_name`。普通用户不能修改该字段。
 
 服务端使用基于 Cookie 的会话认证，写请求校验来源及 CSRF。登录密码使用 Argon2id，供应商密码使用 Fernet 加密。凭据响应设置 `Cache-Control: no-store`；导入错误、日志和操作历史不包含供应商密码。

@@ -516,6 +516,30 @@ def test_bulk_import_atomicity_format_validation_and_no_secret_leaks(
     assert "secret with spaces" not in admin.get(P + "/audit-events").text
 
 
+def test_two_part_import_reuses_mailbox_password_for_account_login(admin):
+    payload = {
+        "tier": "5x",
+        "text": "shared@example.test----mailbox-only-password",
+    }
+    preview = admin.post(P + "/account-imports/preview", json=payload)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["rows"][0]["email"] == "shared@example.test"
+    response = admin.post(
+        P + "/account-imports",
+        json=payload,
+    )
+    assert response.status_code == 201, response.text
+    account = admin.get(P + "/accounts").json()[0]
+    assert account["email"] == "shared@example.test"
+    credentials = admin.get(P + f"/accounts/{account['id']}/credentials")
+    assert credentials.status_code == 200
+    assert credentials.json() == {
+        "email": "shared@example.test",
+        "password": "mailbox-only-password",
+        "auth_password": "mailbox-only-password",
+    }
+
+
 def test_bad_acl_rolls_back_entire_import(admin):
     response = admin.post(
         P + "/account-imports",

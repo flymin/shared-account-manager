@@ -570,10 +570,18 @@ def parse_import(db, data):
         if not line.strip():
             continue
         parts = line.split("----")
-        if len(parts) != 3:
-            errors.append({"line": line_num, "message": "需要三段内容，以 ---- 分隔"})
+        if len(parts) == 2:
+            email, auth_password = parts
+            # A two-part row uses the mailbox password for both services when
+            # the account has no separate target-service password.
+            password = auth_password
+        elif len(parts) == 3:
+            email, password, auth_password = parts
+        else:
+            errors.append(
+                {"line": line_num, "message": "需要两段或三段内容，以 ---- 分隔"}
+            )
             continue
-        email, password, auth_password = parts
         email = email.strip().lower()
         if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email) or len(email) > 254:
             errors.append({"line": line_num, "message": "邮箱格式无效"})

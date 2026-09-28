@@ -101,18 +101,25 @@ async function openFixture(
     const data =
       path === "/auth/me"
         ? { user, csrf_token: "fictional-token" }
-        : path === "/accounts"
-          ? fixtures.map((a) => ({
-              ...(personalFull
-                ? {
-                    ...a,
-                    can_claim: false,
-                    blocked_reasons: ["个人名额已满", ...a.blocked_reasons],
-                  }
-                : a),
-              quota_depleted: a.quota !== null && a.quota < threshold,
-            }))
-          : [];
+        : path === "/accounts/export.csv"
+          ? undefined
+          : path === "/accounts"
+            ? fixtures.map((a) => ({
+                ...(personalFull
+                  ? {
+                      ...a,
+                      can_claim: false,
+                      blocked_reasons: ["个人名额已满", ...a.blocked_reasons],
+                    }
+                  : a),
+                quota_depleted: a.quota !== null && a.quota < threshold,
+              }))
+            : [];
+    if (path === "/accounts/export.csv")
+      return route.fulfill({
+        contentType: "text/csv",
+        body: "\ufeff账号邮箱,登录密码,邮箱密码,账号类别,是否停用,是否设置 2FA\nalpha@example.test,test-pass,test-mail,5x,否,是\n",
+      });
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify(data),
@@ -458,6 +465,12 @@ test("五种状态默认全选，单选、多选和取消某类互不重复", as
 
 test("管理员状态筛选包含已停用，且停用标签不改变行高", async ({ page }) => {
   await openFixture(page, false, accounts, 5, true);
+  await expect(
+    page.getByRole("button", { name: "导出账号 CSV", exact: true }),
+  ).toBeVisible();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出账号 CSV", exact: true }).click();
+  expect((await download).suggestedFilename()).toBe("account-export.csv");
   const statusFilter = page.getByRole("button", {
     name: "筛选状态",
     exact: true,

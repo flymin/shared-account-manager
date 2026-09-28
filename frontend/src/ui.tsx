@@ -298,6 +298,7 @@ const eventNames: Record<string, string> = {
   account_note_added: "新增账号备注",
   account_updated: "修改账号",
   account_deleted: "删除账号",
+  accounts_exported: "导出账号",
   account_disabled: "停用账号",
   account_enabled: "恢复启用账号",
   user_created: "创建用户",
@@ -330,6 +331,7 @@ const fieldNames: Record<string, string> = {
 export function eventText(e: Audit) {
   const d = e.details;
   const parts: string[] = [];
+  if (e.kind === "accounts_exported") parts.push(`导出 ${d.count} 个账号`);
   if (e.kind === "account_note_added") parts.push(`备注 #${d.note_id}`);
   if (d.quota !== undefined) parts.push(`剩余 ${d.quota}%`);
   if (d.reset_at) parts.push(`重置 ${fmt(d.reset_at)}`);

@@ -1,3 +1,7 @@
+import csv
+import io
+from datetime import timedelta, timezone
+
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -17,6 +21,7 @@ from .models import (
     Event,
     Settings,
     LoginSession,
+    TwoFactor,
     now,
 )
 from .config import cipher
@@ -171,6 +176,67 @@ def accounts(
         d.account_dto(db, user, a)
         for a in db.scalars(query.order_by(Account.created_at.desc()))
     ]
+
+
+@app.get("/api/v1/accounts/export.csv")
+def export_accounts(
+    user=Depends(auth.authenticate),
+    db=Depends(get_db, scope="function"),
+):
+    auth.admin(user)
+    cfg = d.settings(db)
+    configured_2fa = set(
+        db.scalars(
+            select(TwoFactor.account_id).where(
+                TwoFactor.kind == "service", TwoFactor.uri_encrypted != ""
+            )
+        )
+    )
+    accounts = list(
+        db.scalars(
+            select(Account)
+            .where(Account.deleted.is_(False))
+            .order_by(Account.created_at, Account.email)
+        )
+    )
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream)
+    writer.writerow(
+        [
+            "账号邮箱",
+            "登录密码",
+            "邮箱密码",
+            "账号类别",
+            "是否停用",
+            "是否设置 2FA",
+            "到期时间（北京时间）",
+        ]
+    )
+    for account in accounts:
+        expires_at = (
+            account.expires_at.astimezone(timezone(timedelta(hours=8))).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            if account.expires_at
+            else ""
+        )
+        writer.writerow(
+            [
+                account.email,
+                cipher().decrypt(account.password_encrypted.encode()).decode(),
+                cipher().decrypt(account.auth_password_encrypted.encode()).decode(),
+                d.option_name(cfg, "tiers", account.tier),
+                "是" if account.disabled else "否",
+                "是" if account.id in configured_2fa else "否",
+                expires_at,
+            ]
+        )
+    d.event(db, "accounts_exported", user, details={"count": len(accounts)})
+    return Response(
+        content="\ufeff" + stream.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="account-export.csv"'},
+    )
 
 
 @app.get("/api/v1/accounts/{account_id}")
