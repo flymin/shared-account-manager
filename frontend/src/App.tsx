@@ -101,6 +101,33 @@ export default function App() {
     };
   }, [refresh]);
   useEffect(() => {
+    if (!user) return;
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get("mail_oauth");
+    if (!result) return;
+    const messages: Record<string, string> = {
+      success: "邮箱 OAuth 授权成功，自动获取验证码已启用",
+      mismatch: "授权邮箱与账号邮箱不一致，未启用自动取码",
+      expired: "OAuth 授权已过期，请重新开始",
+      changed: "账号配置已变化，请重新开始授权",
+      login_required: "管理员登录已失效，请重新登录后授权",
+      failed: "邮箱 OAuth 授权失败，请检查应用配置后重试",
+    };
+    if (messages[result]) {
+      if (result === "success") message.success(messages[result]);
+      else message.error(messages[result]);
+    }
+    params.delete("mail_oauth");
+    params.delete("account_id");
+    const query = params.toString();
+    window.history.replaceState(
+      {},
+      document.title,
+      window.location.pathname + (query ? `?${query}` : "") + window.location.hash,
+    );
+    refresh();
+  }, [user, message, refresh]);
+  useEffect(() => {
     if (user?.role === "user" && !["pool", "mine", "history"].includes(page))
       setPage("pool");
   }, [user?.role, page]);

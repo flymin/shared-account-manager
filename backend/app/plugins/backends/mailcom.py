@@ -52,7 +52,7 @@ def json_script(document, identifier):
 
 
 class MailComClient:
-    def __init__(self, email, password, otp_uri=None, *, transport=None):
+    def __init__(self, email, password, oauth=None, otp_uri=None, *, transport=None):
         # HTTPX INFO records include full bearer-bearing session URLs. These
         # library namespaces must never propagate into the worker's INFO log.
         for name in ("httpx", "httpcore"):
@@ -60,6 +60,13 @@ class MailComClient:
             logger.setLevel(logging.CRITICAL + 1)
             logger.propagate = False
             logger.handlers = [logging.NullHandler()]
+        # Keep the historical positional ``otp_uri`` constructor usable for
+        # provider tests; the worker passes a third OAuth object only to
+        # backends that declare OAuth support.
+        if oauth is not None and hasattr(oauth, "backend_id"):
+            raise MailError("configuration")
+        if otp_uri is None and oauth is not None:
+            otp_uri = oauth
         self.email, self.password, self.otp_uri = email, password, otp_uri
         self.client = httpx.Client(headers={"User-Agent": UA}, transport=transport)
         self.tokens = {}

@@ -39,6 +39,8 @@ curl --fail http://localhost:8080/api/ready
 | `MAIL_TOOLS_CONFIG_PATH` | 空，使用内置配置 | 自定义取码工具 TOML 文件，路径相对于 `deploy/` |
 | `MAIL_CODE_SENDER` | 空 | 六位数字验证码模板的完整发件人地址，精确匹配 |
 | `MAIL_CODE_SUBJECT_KEYWORD` | 空 | 六位数字验证码模板的主题必须包含的固定关键词，不区分大小写 |
+| `OUTLOOK_CODE_SENDER` | 空 | Outlook 工具使用的验证码发件人地址 |
+| `OUTLOOK_CODE_SUBJECT_KEYWORD` | 空 | Outlook 工具使用的验证码主题关键词 |
 | `BUILD_NETWORK` | `default` | Docker 构建网络，必要时可设置为 `host` |
 | `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` | 当前环境 | 构建阶段使用的网络代理配置 |
 
@@ -78,7 +80,7 @@ IMAGE_PREFIX=registry.example.test/dockerhub-cache/
 
 邮箱取码由 `worker` 发起，需要部署环境能够解析并通过 HTTPS 访问已适配邮箱服务的登录与邮箱接口；构建代理参数不会自动配置 worker 的运行时网络。API、数据库与邮件任务均使用服务端时间，请保持宿主机时钟同步，否则 TOTP 代码可能失效。
 
-邮箱等待时长在 Web 系统设置中调整，默认5分钟。仅支持邮箱密码登录；邮箱要求额外验证时，需要在邮箱服务中手动处理。账号 2FA 的二维码配置和使用权限见[登录验证指南](verification.md)。
+邮箱等待时长在 Web 系统设置中调整，默认5分钟。不同邮箱后端的认证方式由插件决定；邮箱要求额外验证时，需要先在邮箱服务中完成授权。账号 2FA 的二维码配置和使用权限见[登录验证指南](verification.md)。
 
 内置的六位数字验证码模板需要同时配置 `MAIL_CODE_SENDER` 和 `MAIL_CODE_SUBJECT_KEYWORD`。例如下列虚构值，部署时替换为实际验证邮件的发件人和稳定的主题关键词：
 
@@ -88,6 +90,8 @@ MAIL_CODE_SUBJECT_KEYWORD=ExampleService
 ```
 
 内置取码工具通过上述环境变量为模板提供参数。未配置或规则无效时，该工具不能自动取码，后台不会访问邮箱。账号选择的“邮箱取码工具”同时决定邮箱后端和模板；清空选择则关闭自动取码。自定义组合可写入私有 TOML，并在 `.env` 中设置 `MAIL_TOOLS_CONFIG_PATH=../.local/mail-tools.toml`；它会替换内置工具配置。配置方式见[工具与插件指南](mail-plugins.md)，API 和 worker 必须使用相同的插件代码及配置。
+
+支持 OAuth 的邮箱工具使用账号详情中的授权流程完成配置。应用 Client ID、可选 Client Secret、租户和 refresh token 按账号加密保存，原始邮箱密码保持独立；部署环境只需提供 `PUBLIC_ORIGIN` 以生成固定回调地址。授权失败、取消或令牌失效时，自动取码会停用并提示管理员重新授权。
 
 ## HTTPS 与反向代理
 

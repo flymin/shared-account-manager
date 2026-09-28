@@ -102,7 +102,8 @@ def get_mail_tool(identity: str | None) -> MailTool | None:
 
 def default_mail_tool() -> str | None:
     identity = tool_catalog().default
-    return identity if get_mail_tool(identity) is not None else None
+    tool = get_mail_tool(identity)
+    return identity if tool is not None and tool.template is not None else None
 
 
 def mail_tool_options():
@@ -112,5 +113,6 @@ def mail_tool_options():
             {"id": tool.id, "name": tool.name}
             for definition in tool_catalog().tools
             if (tool := get_mail_tool(definition.id)) is not None
+            and tool.template is not None
         ],
     }

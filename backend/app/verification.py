@@ -5,7 +5,7 @@ from datetime import timedelta
 from fastapi import HTTPException
 from sqlalchemy import delete, select
 
-from . import auth, domain as d
+from . import auth, domain as d, mail_oauth
 from .config import cipher
 from .plugins import get_mail_tool
 from .models import Account, EmailCodeRun, LoginSession, TwoFactor, User, now
@@ -15,6 +15,7 @@ ERRORS = {
     "configuration": "邮箱验证码匹配规则未配置或无效，请联系管理员",
     "tool_disabled": "未启用自动获取邮箱验证码",
     "tool_unavailable": "邮箱取码工具不可用，请联系管理员",
+    "mail_oauth_required": "管理员尚未完成邮箱授权，请联系管理员",
     "authentication": "邮箱登录失败，请检查邮箱密码",
     "challenge": "邮箱要求额外登录验证，请先在邮箱网站完成验证",
     "two_factor_required": "暂不支持邮箱 2FA，请在邮箱网站手动查看验证码",
@@ -45,6 +46,7 @@ def valid_owner(db, run, stamp):
         and session
         and session.user_id == user.id
         and session.expires_at > stamp
+        and email_unavailable(account, db) is None
         and (user.role == "admin" or d.active_claim(db, user.id, account.id))
     )
 
@@ -71,7 +73,7 @@ def cancel_account_runs(db, account_id):
         finish(run, "cancelled")
 
 
-def email_unavailable(account):
+def email_unavailable(account, db=None):
     if account.mail_tool is None:
         return "tool_disabled"
     tool = get_mail_tool(account.mail_tool)
@@ -79,6 +81,19 @@ def email_unavailable(account):
         return "tool_unavailable"
     if tool.template is None:
         return "configuration"
+    if tool.backend.oauth_provider:
+        if db is None:
+            return "mail_oauth_required"
+        credential = db.get(
+            mail_oauth.MailOAuthCredential,
+            (account.id, tool.backend.id),
+        )
+        if (
+            not credential
+            or credential.status != "active"
+            or credential.authorized_email.casefold() != account.email.casefold()
+        ):
+            return "mail_oauth_required"
     return None
 
 
@@ -120,13 +135,18 @@ def status(db, user, account_id):
     account = d.get_account(db, user, account_id, feedback=True)
     stamp = now()
     result = {"server_time": stamp, "two_factor": {}, "email": None}
-    unavailable = email_unavailable(account)
+    unavailable = email_unavailable(account, db)
     tool = get_mail_tool(account.mail_tool)
     result.update(
         email_config_version=account.mail_config_version,
         email_tool_revision=tool.config_hash if tool else None,
         email_available=unavailable is None,
         email_unavailable_reason=ERRORS.get(unavailable),
+        mail_oauth=(
+            mail_oauth.status(db, account, user)
+            if tool and tool.backend.oauth_provider
+            else {"required": False, "configured": False, "status": "not_required"}
+        ),
     )
     for kind in ("service",):
         config = db.get(TwoFactor, (account_id, kind))
@@ -166,7 +186,7 @@ def start_run(db, user, session, account_id, run_id):
         ):
             return run_dto(existing, stamp)
         raise HTTPException(409, "请求标识已使用，请重试")
-    unavailable = email_unavailable(account)
+    unavailable = email_unavailable(account, db)
     if unavailable:
         raise HTTPException(
             409 if unavailable == "tool_disabled" else 503, ERRORS[unavailable]

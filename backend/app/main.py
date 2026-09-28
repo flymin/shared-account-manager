@@ -21,11 +21,13 @@ from .models import (
     Event,
     Settings,
     LoginSession,
+    MailOAuthCredential,
+    MailOAuthState,
     TwoFactor,
     now,
 )
 from .config import cipher
-from .verification_api import router as verification_router
+from .verification_api import oauth_router, router as verification_router
 from .verification import cancel_account_runs
 from .plugins import mail_tool_options
 from .plugins.tools import tool_catalog
@@ -42,6 +44,7 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 app.include_router(verification_router)
+app.include_router(oauth_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -381,6 +384,15 @@ def update_account(
     ):
         cancel_account_runs(db, a.id)
         a.mail_config_version += 1
+    if "mail_tool" in values and a.mail_tool != data.mail_tool:
+        db.execute(
+            delete(MailOAuthCredential).where(
+                MailOAuthCredential.account_id == a.id
+            )
+        )
+        db.execute(
+            delete(MailOAuthState).where(MailOAuthState.account_id == a.id)
+        )
     for field in (
         "tier",
         "capacity",
@@ -431,6 +443,15 @@ def delete_account(
     if not data.reason.strip():
         d.fail("请填写删除原因", 422)
     if not a.deleted:
+        cancel_account_runs(db, a.id)
+        db.execute(
+            delete(MailOAuthCredential).where(
+                MailOAuthCredential.account_id == a.id
+            )
+        )
+        db.execute(
+            delete(MailOAuthState).where(MailOAuthState.account_id == a.id)
+        )
         for c in db.scalars(
             select(Claim).where(Claim.account_id == a.id, Claim.returned_at.is_(None))
         ):

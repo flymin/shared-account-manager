@@ -5,13 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
-from . import auth, domain as d, totp, verification as v
+from . import auth, domain as d, mail_oauth, totp, verification as v
 from .config import cipher
 from .db import get_db, Session
 from .models import TwoFactor, now
-from .schemas import Input
+from .schemas import Input, MailOAuthInput
 
 router = APIRouter(prefix="/api/v1/accounts/{account_id}")
+oauth_router = APIRouter(prefix="/api/v1")
 Kind = Literal["service"]
 
 
@@ -39,6 +40,26 @@ def start(
     db=Depends(get_db, scope="function"),
 ):
     return v.start_run(db, user, request.state.login_session, account_id, str(data.id))
+
+
+@router.post("/mail-oauth/authorize")
+def authorize_mail_oauth(
+    account_id: str,
+    data: MailOAuthInput,
+    request: Request,
+    user=Depends(auth.admin),
+    db=Depends(get_db, scope="function"),
+):
+    return mail_oauth.begin(db, user, request.state.login_session, account_id, data)
+
+
+@router.delete("/mail-oauth")
+def revoke_mail_oauth(
+    account_id: str,
+    user=Depends(auth.admin),
+    db=Depends(get_db, scope="function"),
+):
+    return mail_oauth.revoke(db, user, account_id)
 
 
 @router.get("/email-code-runs/{run_id}")
@@ -119,3 +140,13 @@ def get_code(
     )
     result["version"] = config.version
     return result
+
+
+@oauth_router.get("/mail-oauth/callback")
+def mail_oauth_callback(
+    request: Request,
+    state: str | None = None,
+    code: str | None = None,
+    error: str | None = None,
+):
+    return mail_oauth.callback(request, state, code, error)

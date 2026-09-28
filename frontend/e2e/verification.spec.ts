@@ -82,6 +82,13 @@ async function fixture(
     emailConfigVersion: 0,
     emailToolRevision: "synthetic-tool-revision-1",
     mailTools: [{ id: "mailcom", name: "mail.com" }],
+    mailOAuth: {
+      required: false,
+      configured: false,
+      status: "not_required",
+      updated_at: null as string | null,
+      version: 0,
+    },
     findEmail: false,
     delayStart: false,
     busyAccount: "",
@@ -212,7 +219,10 @@ async function fixture(
         email_tool_revision: state.emailToolRevision,
         email_unavailable_reason: state.emailAvailable
           ? null
-          : "未启用自动获取邮箱验证码",
+          : state.mailOAuth.required && !state.mailOAuth.configured
+            ? "管理员尚未完成邮箱授权，请联系管理员"
+            : "未启用自动获取邮箱验证码",
+        mail_oauth: state.mailOAuth,
         two_factor: { service: state.configs[accountId] },
         email:
           state.busyAccount === accountId
@@ -248,6 +258,25 @@ async function fixture(
           releaseStart = resolve;
         });
       return send(response);
+    }
+    if (
+      selected &&
+      path.endsWith("/mail-oauth/authorize") &&
+      method === "POST"
+    )
+      return send({
+        authorization_url:
+          "https://login.example.test/authorize?state=synthetic-state",
+        expires_at: new Date(stamp + 600000).toISOString(),
+      });
+    if (selected && path.endsWith("/mail-oauth") && method === "DELETE") {
+      state.mailOAuth = {
+        ...state.mailOAuth,
+        configured: false,
+        status: "not_configured",
+      };
+      state.emailAvailable = false;
+      return send(state.mailOAuth);
     }
     if (selected && path.includes("/email-code-runs/")) {
       const id = path.split("/").at(-1)!;
@@ -339,6 +368,7 @@ async function fixture(
     refreshTotp,
     hasDelayedStart: () => !!releaseStart,
     hasDelayedCredentials: () => !!releaseCredentials,
+    accounts,
   };
 }
 
@@ -369,6 +399,53 @@ test.describe("verification with synthetic APIs", () => {
     await expect(
       page.locator(".ant-modal").getByText("Other 登录验证码", { exact: true }),
     ).toBeVisible();
+  });
+
+  test("admin opens Outlook OAuth configuration from account details", async ({
+    page,
+  }) => {
+    const f = await fixture(page, { admin: true });
+    f.accounts[0].mail_tool = "outlook";
+    f.accounts[0].mail_tool_name = "Outlook 登录验证码";
+    f.state.mailTools.push({ id: "outlook", name: "Outlook 登录验证码" });
+    f.state.mailOAuth = {
+      required: true,
+      configured: false,
+      status: "not_configured",
+      updated_at: null,
+      version: 0,
+    };
+    f.state.emailAvailable = false;
+    await page.goto("/");
+    await navigation(page, "账号管理");
+    await page.getByRole("button", { name: "详情", exact: true }).click();
+    await expect(page.getByText("管理员尚未完成邮箱授权，请联系管理员")).toBeVisible();
+    await page.getByRole("button", { name: "配置邮箱 OAuth" }).click();
+    await page.getByLabel("Client ID").fill("fictional-client");
+    await expect(page.getByLabel("Client Secret（可选）")).toBeVisible();
+    await expect(page.getByLabel("租户")).toHaveValue("consumers");
+    await page.getByRole("button", { name: "取消", exact: true }).click();
+  });
+
+  test("ordinary users can only see the unavailable reason for unconfigured Outlook OAuth", async ({
+    page,
+  }) => {
+    const f = await fixture(page);
+    f.accounts[0].mail_tool = "outlook";
+    f.accounts[0].mail_tool_name = "Outlook 登录验证码";
+    f.state.mailOAuth = {
+      required: true,
+      configured: false,
+      status: "not_configured",
+      updated_at: null,
+      version: 0,
+    };
+    f.state.emailAvailable = false;
+    await f.openClaims();
+    await expect(
+      f.card().getByText("管理员尚未完成邮箱授权，请联系管理员", { exact: true }),
+    ).toBeVisible();
+    await expect(f.card().getByRole("button", { name: /配置邮箱 OAuth|重新授权/ })).toHaveCount(0);
   });
 
   test("disabling mail fetching clears an already displayed code and keeps service 2FA", async ({

@@ -15,6 +15,54 @@ class MailError(Exception):
 
 
 @dataclass(frozen=True)
+class OAuthCredential:
+    """Decrypted, short-lived-in-memory credential passed to a backend plugin."""
+
+    backend_id: str
+    client_id: str
+    client_secret: str | None
+    tenant: str
+    refresh_token: str
+    version: int
+
+
+@dataclass(frozen=True)
+class MailboxCredentials:
+    """Account mailbox credentials; the password is never overloaded with OAuth."""
+
+    email: str
+    password: str
+    oauth: OAuthCredential | None = None
+
+
+class OAuthProvider(Protocol):
+    """Provider capability used by the account-scoped OAuth lifecycle."""
+
+    backend_id: str
+
+    @staticmethod
+    def validate_config(client_id, client_secret, tenant): ...
+
+    @staticmethod
+    def pkce_pair(): ...
+
+    def authorization_url(
+        self, *, client_id, tenant, redirect_uri, state, code_challenge
+    ): ...
+
+    def exchange_code(
+        self,
+        *,
+        code,
+        code_verifier,
+        client_id,
+        client_secret,
+        tenant,
+        redirect_uri,
+    ): ...
+
+
+@dataclass(frozen=True)
 class Message:
     message_id: str
     sender: str
@@ -30,6 +78,10 @@ class Candidate:
 
 
 class Mailbox(Protocol):
+    def set_refresh_token_callback(self, callback: Callable[[str], None]) -> None:
+        """Receive rotated OAuth refresh tokens before mailbox work continues."""
+        ...
+
     def iter_unread(self, since: datetime, deadline: datetime) -> Iterator[Message]:
         """Newest first, receipt time in UTC; start a bounded polling cycle."""
         ...

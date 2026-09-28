@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Space, Tag } from "antd";
+import { Alert, App, Button, Form, Input, Modal, Space, Tag } from "antd";
 import { api, ApiError, getSessionVersion } from "./api";
 import { CopyButton } from "./ui";
 
@@ -15,6 +15,17 @@ type Status = {
   email_tool_revision: string | null;
   email_config_version: number;
   email_unavailable_reason: string | null;
+  mail_oauth: {
+    required: boolean;
+    configured: boolean;
+    status: string;
+    updated_at: string | null;
+    version: number;
+    client_id?: string;
+    tenant?: string;
+    authorized_email?: string;
+    redirect_uri?: string;
+  };
   two_factor: Record<Kind, Config>;
   email: {
     owner: string;
@@ -59,14 +70,19 @@ export function receivedTime(value: string) {
 export function Verification({
   accountId,
   manageTwoFactor = false,
+  manageMailOAuth = false,
 }: {
   accountId: string;
   manageTwoFactor?: boolean;
+  manageMailOAuth?: boolean;
 }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
+  const [oauthOpen, setOauthOpen] = useState(false);
+  const [oauthSaving, setOauthSaving] = useState(false);
+  const [oauthForm] = Form.useForm();
   const [clock, setClock] = useState(Date.now());
   const alive = useRef(false),
     runId = useRef<string | null>(null);
@@ -77,6 +93,7 @@ export function Verification({
   const lifecycle = useRef(0);
   const mailConfigVersion = useRef<string | null>(null);
   const base = `/accounts/${accountId}`;
+  const { message } = App.useApp();
   const canUpdate = () =>
     alive.current && session.current === getSessionVersion();
   const seconds = (deadline: string) =>
@@ -113,6 +130,13 @@ export function Verification({
           offset.current = Date.parse(data.server_time) - Date.now();
           setStatus((previous) => ({
             ...data,
+            mail_oauth: data.mail_oauth || {
+              required: false,
+              configured: false,
+              status: "not_required",
+              updated_at: null,
+              version: 0,
+            },
             two_factor: {
               service:
                 previous &&
@@ -274,6 +298,72 @@ export function Verification({
       if (canUpdate()) setError((e as Error).message);
     }
   }
+  function openOAuth() {
+    oauthForm.setFieldsValue({
+      client_id: "",
+      client_secret: "",
+      tenant: status?.mail_oauth.tenant || "consumers",
+    });
+    setOauthOpen(true);
+  }
+  async function authorizeOAuth(values: {
+    client_id: string;
+    client_secret?: string;
+    tenant: string;
+  }) {
+    setOauthSaving(true);
+    try {
+      const result = await api<{ authorization_url: string }>(
+        `${base}/mail-oauth/authorize`,
+        "POST",
+        {
+          client_id: values.client_id,
+          client_secret: values.client_secret || null,
+          tenant: values.tenant,
+        },
+      );
+      setOauthOpen(false);
+      window.location.assign(result.authorization_url);
+    } catch (e) {
+      message.error((e as Error).message);
+    } finally {
+      setOauthSaving(false);
+    }
+  }
+  function revokeOAuth() {
+    Modal.confirm({
+      title: "取消邮箱 OAuth 授权？",
+      content: "将清除该账号保存的 OAuth 凭据，之后需要重新授权才能自动获取邮箱验证码。",
+      okText: "取消授权",
+      okButtonProps: { danger: true },
+      cancelText: "保留授权",
+      onOk: async () => {
+        try {
+          await api(`${base}/mail-oauth`, "DELETE");
+          message.success("邮箱 OAuth 授权已取消");
+          setStatus((value) =>
+            value
+              ? {
+                  ...value,
+                  email_available: false,
+                  email_unavailable_reason: "管理员尚未完成邮箱授权，请联系管理员",
+                  mail_oauth: {
+                    ...value.mail_oauth,
+                    configured: false,
+                    status: "not_configured",
+                    client_id: undefined,
+                    tenant: undefined,
+                    authorized_email: undefined,
+                  },
+                }
+              : value,
+          );
+        } catch (e) {
+          message.error((e as Error).message);
+        }
+      },
+    });
+  }
   const busy =
     status?.email && seconds(status.email.deadline) > 0 && !active(run);
   return (
@@ -283,9 +373,18 @@ export function Verification({
           <strong>邮箱验证码</strong>
           <Space className="verification-actions" size={6} wrap>
             {status && !status.email_available ? (
-              <span className="muted">
-                {status.email_unavailable_reason || "自动取码不可用"}
-              </span>
+              <>
+                <span className="muted">
+                  {status.email_unavailable_reason || "自动取码不可用"}
+                </span>
+                {manageMailOAuth && status.mail_oauth.required && (
+                  <Button onClick={openOAuth} disabled={oauthSaving}>
+                    {status.mail_oauth.status === "not_configured"
+                      ? "配置邮箱 OAuth"
+                      : "重新授权"}
+                  </Button>
+                )}
+              </>
             ) : (
               <Button
                 aria-label="获取邮箱验证码"
@@ -345,6 +444,83 @@ export function Verification({
           <span className="muted">已取消获取。</span>
         )}
       </div>
+      {manageMailOAuth && status?.mail_oauth.required && status.mail_oauth.status !== "not_configured" && (
+        <div className="verification-section mail-oauth-status">
+          <div className="verification-heading">
+            <strong>邮箱 OAuth</strong>
+            <Space className="verification-actions" size={6} wrap>
+              <Tag color={status.mail_oauth.configured ? "green" : "gold"}>
+                {status.mail_oauth.configured ? "已授权" : "需要重新授权"}
+              </Tag>
+              <Button onClick={openOAuth}>重新授权</Button>
+              <Button danger onClick={revokeOAuth}>取消授权</Button>
+            </Space>
+          </div>
+          <span className="muted">
+            {status.mail_oauth.client_id || "已配置"} · {status.mail_oauth.tenant}
+          </span>
+        </div>
+      )}
+      <Modal
+        title="配置邮箱 OAuth"
+        open={oauthOpen}
+        onCancel={() => setOauthOpen(false)}
+        onOk={() => oauthForm.submit()}
+        okText="开始授权"
+        cancelText="取消"
+        confirmLoading={oauthSaving}
+        destroyOnHidden
+      >
+        <Alert
+          type="info"
+          showIcon
+          message="授权完成前不会启用自动获取邮箱验证码"
+          description="请使用与当前账号邮箱一致的 Microsoft 账号完成登录。Client Secret 可留空；原始邮箱密码保持独立，OAuth 凭据按账号加密保存。"
+          style={{ marginBottom: 16 }}
+        />
+        <Form form={oauthForm} layout="vertical" onFinish={authorizeOAuth}>
+          <Form.Item label="回调地址">
+            <Input
+              readOnly
+              value={
+                status?.mail_oauth.redirect_uri ||
+                `${window.location.origin}/api/v1/mail-oauth/callback`
+              }
+              onFocus={(event) => event.currentTarget.select()}
+              addonAfter={
+                <CopyButton
+                  value={
+                    status?.mail_oauth.redirect_uri ||
+                    `${window.location.origin}/api/v1/mail-oauth/callback`
+                  }
+                  label="回调地址"
+                />
+              }
+            />
+            <span className="muted">
+              请先将此地址登记到 OAuth 应用的回调地址列表。
+            </span>
+          </Form.Item>
+          <Form.Item
+            name="client_id"
+            label="Client ID"
+            rules={[{ required: true, message: "请输入 Client ID" }]}
+          >
+            <Input autoComplete="off" />
+          </Form.Item>
+          <Form.Item name="client_secret" label="Client Secret（可选）">
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item
+            name="tenant"
+            label="租户"
+            rules={[{ required: true, message: "请输入租户" }]}
+            extra="个人账号通常使用 consumers；组织账号按应用注册配置填写。"
+          >
+            <Input autoComplete="off" />
+          </Form.Item>
+        </Form>
+      </Modal>
       {status &&
         (["service"] as Kind[]).map((kind) => (
           <TwoFactor

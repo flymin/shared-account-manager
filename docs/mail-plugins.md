@@ -15,7 +15,8 @@ backend/app/
     ├── tools.toml                内置工具配置
     ├── backends/
     │   ├── __init__.py           后端实现注册表
-    │   └── mailcom.py            邮箱访问实现
+    │   ├── mailcom.py            一种网页邮箱访问实现
+    │   └── outlook.py            Graph OAuth 邮箱访问实现
     ├── templates/
     │   ├── __init__.py           模板实现注册表
     │   └── six_digit_code.py     六位数字验证码模板
@@ -30,7 +31,7 @@ backend/app/
 
 ## 注册取码工具
 
-内置配置 `backend/app/plugins/tools.toml` 将 `mailcom` 后端与 `six_digit_code` 模板组合为一个名为 `mail.com` 的工具。其工具 ID 保持为 `mailcom`，兼容已有账号的选择；工具 ID 与后端 ID 属于不同的注册表，不要求相同。
+内置配置 `backend/app/plugins/tools.toml` 将邮箱后端与 `six_digit_code` 模板组合为工具。`mailcom` 工具保持原 ID 以兼容已有账号；`outlook` 工具需要配置匹配规则和 Microsoft Graph OAuth 后端。工具 ID 与后端 ID 属于不同的注册表，不要求相同。
 
 工具配置示例：
 
@@ -92,7 +93,7 @@ API、worker 和初始化容器只读挂载同一个配置文件。文件需要�
 
 ## 新增插件
 
-1. 邮箱后端实现放入 `backends/`，并在其 `__init__.py` 中加入 `MAIL_BACKENDS`。工厂接收账号邮箱和邮箱密码，返回 `Mailbox` 客户端。
+1. 邮箱后端实现放入 `backends/`，并在其 `__init__.py` 中加入 `MAIL_BACKENDS`。工厂接收账号邮箱、原始邮箱密码和可选的账号级 OAuth 凭据，返回 `Mailbox` 客户端。
 2. 邮件模板实现放入 `templates/`，并在其 `__init__.py` 中加入 `EMAIL_TEMPLATES`。工厂接收工具的 `options` 字典，配置有效时返回 `EmailTemplate`，否则返回 `None`。
 3. 在 TOML 中新增工具，将后端 ID、模板 ID 和参数组合起来。复用现有后端只需新增模板并注册工具，无需改 worker、数据库约束或前端选项。
 4. 添加模拟测试，重新构建并部署 API 和 worker。工具与插件 ID 发布后应保持稳定。
@@ -112,6 +113,14 @@ EMAIL_TEMPLATES["alphanumeric_code"] = EmailTemplatePlugin(
 ## 接口约定
 
 `Mailbox`、`EmailTemplate`、`Message` 和 `Candidate` 定义于 `backend/app/mail.py`。
+
+### OAuth 邮箱后端认证
+
+支持 OAuth 的后端通过 `oauth_provider` 声明通用授权能力。管理员在账号详情发起授权码 + PKCE 流程，按账号填写 Client ID、可选 Client Secret 和租户；授权完成后服务端校验授权邮箱与账号邮箱一致，再将 refresh token 加密保存到独立凭据表。原始邮箱密码字段保持不变，普通用户不能配置 OAuth。
+
+授权状态、refresh token、Client Secret 和 PKCE 临时值不得写入日志、CSV、测试夹具或前端响应。访问令牌只存在于 worker 进程内；供应商轮换 refresh token 时由 worker 在版本校验后更新加密记录。管理员取消授权会清除该账号的 OAuth 凭据，切换到其他邮箱后端也会清理旧授权。
+
+Graph 后端使用授权应用的 delegated `Mail.ReadWrite`、`User.Read` 和 `offline_access` 权限，只读取收件箱未读消息，原文通过受限接口读取；标记已读使用写入前权限检查并读取确认。所有 provider 错误转换为稳定的 `MailError` 键，不向用户回显供应商响应。
 
 | 邮箱后端方法 | 约定 |
 | --- | --- |

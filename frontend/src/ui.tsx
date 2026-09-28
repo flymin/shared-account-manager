@@ -238,10 +238,12 @@ export function Credentials({
   accountId,
   epoch,
   manageTwoFactor = false,
+  manageMailOAuth = false,
 }: {
   accountId: string;
   epoch: number;
   manageTwoFactor?: boolean;
+  manageMailOAuth?: boolean;
 }) {
   const { data, error, errorStatus } = useResource<{
     email: string;
@@ -281,6 +283,7 @@ export function Credentials({
         key={`${accountId}:${getSessionVersion()}`}
         accountId={accountId}
         manageTwoFactor={manageTwoFactor}
+        manageMailOAuth={manageMailOAuth}
       />
     </div>
   );
@@ -312,6 +315,9 @@ const eventNames: Record<string, string> = {
   two_factor_updated: "更新 2FA 配置",
   two_factor_removed: "取消 2FA 配置",
   email_code_started: "获取邮箱验证码",
+  mail_oauth_started: "开始邮箱 OAuth 授权",
+  mail_oauth_authorized: "完成邮箱 OAuth 授权",
+  mail_oauth_revoked: "取消邮箱 OAuth 授权",
 };
 const fieldNames: Record<string, string> = {
   tier: "类型",

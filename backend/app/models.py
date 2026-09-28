@@ -238,6 +238,55 @@ class TwoFactor(Base):
     __table_args__ = (CheckConstraint("kind IN ('service','mail')"),)
 
 
+class MailOAuthCredential(Base):
+    """Encrypted, account-scoped authorization for an OAuth mailbox backend."""
+
+    __tablename__ = "mail_oauth_credentials"
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True
+    )
+    backend_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_id_encrypted: Mapped[str] = mapped_column(Text)
+    client_secret_encrypted: Mapped[str | None] = mapped_column(Text)
+    tenant: Mapped[str] = mapped_column(String(128))
+    refresh_token_encrypted: Mapped[str] = mapped_column(Text)
+    authorized_email: Mapped[str] = mapped_column(String(254))
+    status: Mapped[str] = mapped_column(String(30), default="active")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active','reauthorize_required')",
+            name="mail_oauth_credentials_status",
+        ),
+    )
+
+
+class MailOAuthState(Base):
+    """Short-lived server-side state for an administrator's OAuth redirect."""
+
+    __tablename__ = "mail_oauth_states"
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE")
+    )
+    backend_id: Mapped[str] = mapped_column(String(64))
+    admin_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    session_hash: Mapped[str] = mapped_column(String(64))
+    client_id_encrypted: Mapped[str] = mapped_column(Text)
+    client_secret_encrypted: Mapped[str | None] = mapped_column(Text)
+    tenant: Mapped[str] = mapped_column(String(128))
+    code_verifier_encrypted: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        Index("ix_mail_oauth_states_expires_at", "expires_at"),
+    )
+
+
 class EmailCodeRun(Base):
     __tablename__ = "email_code_runs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

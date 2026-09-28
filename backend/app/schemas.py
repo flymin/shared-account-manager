@@ -184,3 +184,9 @@ class AccountNoteInput(Input):
     content: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
     ]
+
+
+class MailOAuthInput(Input):
+    client_id: str = Field(min_length=1, max_length=256)
+    client_secret: str | None = Field(default=None, max_length=512)
+    tenant: str = Field(default="consumers", min_length=1, max_length=128)

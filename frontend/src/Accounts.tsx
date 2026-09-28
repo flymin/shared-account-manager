@@ -901,6 +901,7 @@ export function Pool({
                 accountId={currentDetail.id}
                 epoch={epoch}
                 manageTwoFactor={adminMode && user.role === "admin"}
+                manageMailOAuth={adminMode && user.role === "admin"}
               />
             )}
             {adminMode && (
