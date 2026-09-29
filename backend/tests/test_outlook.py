@@ -1,4 +1,6 @@
+import gzip
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlsplit
 
@@ -239,6 +241,59 @@ def test_manual_authorization_code_exchange_omits_secret_and_pkce():
     )
     assert token.refresh_token == "refresh"
     assert token.authorized_email == "fixture@outlook.com"
+
+
+@pytest.mark.parametrize("provider_type,redirect_uri,verifier", [
+    (OutlookManualOAuthProvider, "https://localhost", None),
+    (OutlookOAuthProvider, "https://example.test/api/v1/mail-oauth/callback", "verifier"),
+])
+def test_oauth_exchange_accepts_compressed_token_and_profile(
+    provider_type, redirect_uri, verifier
+):
+    def compressed(value):
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "gzip", "Content-Type": "application/json"},
+            content=gzip.compress(json.dumps(value).encode()),
+        )
+
+    def transport(request):
+        if request.url.host == "login.microsoftonline.com":
+            return compressed({"access_token": "access", "refresh_token": "refresh"})
+        assert request.url.host == "graph.microsoft.com"
+        return compressed({"mail": "fixture@outlook.com"})
+
+    provider = provider_type(transport=httpx.MockTransport(transport))
+    token = provider.exchange_code(
+        code="fictional-code",
+        code_verifier=verifier,
+        client_id="fictional-client",
+        client_secret=None,
+        tenant="common" if verifier is None else "consumers",
+        redirect_uri=redirect_uri,
+    )
+    assert token.refresh_token == "refresh"
+    assert token.authorized_email == "fixture@outlook.com"
+
+
+def test_graph_mailbox_accepts_compressed_response():
+    def transport(request):
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "gzip", "Content-Type": "application/json"},
+            content=gzip.compress(b'{"value": []}'),
+        )
+
+    client = OutlookGraphClient(
+        "fixture@outlook.com", "fictional-password", transport=httpx.MockTransport(transport)
+    )
+    client.budget = time.monotonic() + 10
+    try:
+        assert client._request("GET", "https://graph.microsoft.com/v1.0/me").json() == {
+            "value": []
+        }
+    finally:
+        client.close()
 
 
 @pytest.mark.parametrize("provider_type,redirect_uri,verifier", [

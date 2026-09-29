@@ -66,6 +66,21 @@ class OAuthToken:
     authorized_email: str
 
 
+def decoded_response(raw, body):
+    """Rebuild a bounded, already decompressed streamed response."""
+
+    return httpx.Response(
+        raw.status_code,
+        headers={
+            key: value
+            for key, value in raw.headers.items()
+            if key.lower() not in {"content-encoding", "content-length"}
+        },
+        content=bytes(body),
+        request=raw.request,
+    )
+
+
 class OutlookOAuthProvider:
     """OAuth authorization-code + PKCE implementation for Microsoft Graph."""
 
@@ -139,12 +154,7 @@ class OutlookOAuthProvider:
                     if len(body) + len(chunk) > MAX_BODY:
                         raise MailError("protocol")
                     body.extend(chunk)
-                response = httpx.Response(
-                    raw.status_code,
-                    headers=raw.headers,
-                    content=bytes(body),
-                    request=raw.request,
-                )
+                response = decoded_response(raw, body)
         except httpx.HTTPError:
             raise MailError("network", True) from None
         if response.is_redirect:
@@ -391,12 +401,7 @@ class OutlookGraphClient:
                         raise MailError("protocol")
                     self._remaining()
                     body.extend(chunk)
-                response = httpx.Response(
-                    raw.status_code,
-                    headers=raw.headers,
-                    content=bytes(body),
-                    request=raw.request,
-                )
+                response = decoded_response(raw, body)
         except httpx.HTTPError:
             raise MailError("network", True) from None
         if response.is_redirect or len(response.content) > MAX_BODY:
