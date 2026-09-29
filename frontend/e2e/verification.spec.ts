@@ -447,6 +447,11 @@ test.describe("verification with synthetic APIs", () => {
     await page.getByRole("button", { name: "详情", exact: true }).click();
     await expect(page.getByText("管理员尚未完成邮箱授权，请联系管理员")).toBeVisible();
     await page.getByRole("button", { name: "配置邮箱 OAuth" }).click();
+    const dialog = page.locator(".ant-modal");
+    await expect(dialog.getByText(f.accounts[0].email, { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Synthetic-Mail-Password", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "复制账号" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "复制邮箱密码" })).toBeVisible();
     await page.getByLabel("Client ID").fill("fictional-client");
     await expect(page.getByLabel("Client Secret（可选）")).toBeVisible();
     await expect(page.getByLabel("租户")).toHaveValue("consumers");
@@ -473,6 +478,11 @@ test.describe("verification with synthetic APIs", () => {
     await navigation(page, "账号管理");
     await page.getByRole("button", { name: "详情", exact: true }).click();
     await page.getByRole("button", { name: "开始手动授权" }).click();
+    const dialog = page.locator(".ant-modal");
+    await expect(dialog.getByText(f.accounts[0].email, { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Synthetic-Mail-Password", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "复制账号" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "复制邮箱密码" })).toBeVisible();
     await expect(page.getByLabel("授权网址")).toBeVisible();
     await expect(page.locator(".ant-modal").getByLabel("Client ID")).toHaveCount(0);
     await expect(page.getByRole("link", { name: "在新标签页打开授权网址" })).toBeVisible();

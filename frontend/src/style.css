@@ -423,6 +423,25 @@ small {
   font-size: 12px;
   user-select: all;
 }
+.oauth-mailbox-credentials {
+  --credential-label-width: 68px;
+  --credential-gap: 8px;
+  --credential-padding: 12px;
+  margin-bottom: 16px;
+  border: 1px solid #dfebe4;
+  background: #f6f9f7;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.oauth-mailbox-credentials .credential-row:last-child {
+  border-bottom: 0;
+}
+.oauth-mailbox-credentials .credential-row > span {
+  white-space: nowrap;
+}
+.oauth-mailbox-credentials code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 .credential-footer {
   padding: 8px var(--credential-padding);
   display: flex;

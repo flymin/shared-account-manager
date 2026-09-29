@@ -284,6 +284,11 @@ export function Credentials({
         accountId={accountId}
         manageTwoFactor={manageTwoFactor}
         manageMailOAuth={manageMailOAuth}
+        mailbox={
+          manageMailOAuth
+            ? { email: data.email, password: data.auth_password }
+            : undefined
+        }
       />
     </div>
   );

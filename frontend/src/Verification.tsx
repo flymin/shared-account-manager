@@ -72,10 +72,12 @@ export function Verification({
   accountId,
   manageTwoFactor = false,
   manageMailOAuth = false,
+  mailbox,
 }: {
   accountId: string;
   manageTwoFactor?: boolean;
   manageMailOAuth?: boolean;
+  mailbox?: { email: string; password: string };
 }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [run, setRun] = useState<Run | null>(null);
@@ -598,6 +600,20 @@ export function Verification({
         closable={!oauthSaving}
         destroyOnHidden
       >
+        {manageMailOAuth && oauthOpen && mailbox && (
+          <div className="oauth-mailbox-credentials" aria-label="邮箱账号信息">
+            {[
+              ["账号", mailbox.email],
+              ["邮箱密码", mailbox.password],
+            ].map(([label, value]) => (
+              <div className="credential-row" key={label}>
+                <span>{label}</span>
+                <code>{value}</code>
+                <CopyButton value={value} label={label} />
+              </div>
+            ))}
+          </div>
+        )}
         {oauthMode === "manual" ? (
           <>
             <Alert
