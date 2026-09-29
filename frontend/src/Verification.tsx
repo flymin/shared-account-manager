@@ -82,6 +82,7 @@ export function Verification({
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [oauthOpen, setOauthOpen] = useState(false);
+  const [oauthMode, setOauthMode] = useState<"callback" | "manual" | null>(null);
   const [oauthSaving, setOauthSaving] = useState(false);
   const [oauthForm] = Form.useForm();
   const [manualForm] = Form.useForm();
@@ -214,6 +215,7 @@ export function Verification({
         setStatus(null);
         setOauthSaving(false);
         setOauthOpen(false);
+        setOauthMode(null);
         setManualUrl("");
       }
       alive.current = false;
@@ -317,6 +319,7 @@ export function Verification({
       client_secret: "",
       tenant: status?.mail_oauth.tenant || "consumers",
     });
+    setOauthMode("callback");
     setOauthOpen(true);
   }
 
@@ -338,6 +341,7 @@ export function Verification({
         return;
       setManualUrl(result.authorization_url);
       manualForm.setFieldsValue({ callback_url: "" });
+      setOauthMode("manual");
       setOauthOpen(true);
     } catch (e) {
       if (
@@ -392,6 +396,7 @@ export function Verification({
       )
         return;
       setOauthOpen(false);
+      setOauthMode(null);
       setManualUrl("");
       message.success("Outlook manual 授权成功，自动获取验证码已启用");
       setStatus((value) =>
@@ -434,6 +439,7 @@ export function Verification({
       onOk: async () => {
         oauthGeneration.current += 1;
         setOauthOpen(false);
+        setOauthMode(null);
         try {
           await api(`${base}/mail-oauth`, "DELETE");
           message.success("邮箱 OAuth 授权已取消");
@@ -567,7 +573,7 @@ export function Verification({
       )}
       <Modal
         title={
-          status?.mail_oauth.mode === "manual"
+          oauthMode === "manual"
             ? "Outlook manual 授权"
             : "配置邮箱 OAuth"
         }
@@ -577,13 +583,14 @@ export function Verification({
           oauthGeneration.current += 1;
           setOauthSaving(false);
           setOauthOpen(false);
+          setOauthMode(null);
         }}
         onOk={() =>
-          status?.mail_oauth.mode === "manual"
+          oauthMode === "manual"
             ? manualForm.submit()
             : oauthForm.submit()
         }
-        okText={status?.mail_oauth.mode === "manual" ? "完成授权" : "开始授权"}
+        okText={oauthMode === "manual" ? "完成授权" : "开始授权"}
         cancelText="取消"
         confirmLoading={oauthSaving}
         maskClosable={!oauthSaving}
@@ -591,7 +598,7 @@ export function Verification({
         closable={!oauthSaving}
         destroyOnHidden
       >
-        {status?.mail_oauth.mode === "manual" ? (
+        {oauthMode === "manual" ? (
           <>
             <Alert
               type="info"

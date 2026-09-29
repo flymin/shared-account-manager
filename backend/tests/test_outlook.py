@@ -241,6 +241,37 @@ def test_manual_authorization_code_exchange_omits_secret_and_pkce():
     assert token.authorized_email == "fixture@outlook.com"
 
 
+@pytest.mark.parametrize("provider_type,redirect_uri,verifier", [
+    (OutlookManualOAuthProvider, "https://localhost", None),
+    (OutlookOAuthProvider, "https://example.test/api/v1/mail-oauth/callback", "verifier"),
+])
+@pytest.mark.parametrize("provider_error,expected", [
+    ("invalid_grant", "oauth_code_invalid"),
+    ("invalid_client", "oauth_client_invalid"),
+    ("invalid_scope", "oauth_permission_denied"),
+])
+def test_oauth_exchange_classifies_provider_errors(
+    provider_type, redirect_uri, verifier, provider_error, expected
+):
+    provider = provider_type(transport=httpx.MockTransport(
+        lambda request: httpx.Response(400, json={
+            "error": provider_error,
+            "error_description": "Must never be shown to an administrator",
+        })
+    ))
+    with pytest.raises(MailError) as exc:
+        provider.exchange_code(
+            code="fictional-code",
+            code_verifier=verifier,
+            client_id="fictional-client",
+            client_secret=None,
+            tenant="common" if verifier is None else "consumers",
+            redirect_uri=redirect_uri,
+        )
+    assert exc.value.code == expected
+    assert "Must never" not in str(exc.value)
+
+
 @pytest.mark.parametrize(
     "client_secret,tenant",
     [("secret", "common"), (None, "consumers")],

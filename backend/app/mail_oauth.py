@@ -1,6 +1,7 @@
 """Account-scoped OAuth lifecycle for mailbox backend plugins."""
 
 import hashlib
+import logging
 import os
 import secrets
 from datetime import timedelta
@@ -27,6 +28,15 @@ from .plugins import get_mail_tool
 from .schemas import MailOAuthInput
 
 STATE_TTL_SECONDS = 10 * 60
+logger = logging.getLogger(__name__)
+
+OAUTH_EXCHANGE_RESULTS = {
+    "oauth_code_invalid": "code_invalid",
+    "oauth_client_invalid": "client_invalid",
+    "oauth_permission_denied": "permission_denied",
+    "oauth_profile_denied": "profile_denied",
+    "network": "network",
+}
 
 
 def redirect_uri():
@@ -367,7 +377,16 @@ def _complete(
             tenant=tenant,
             redirect_uri=state_redirect_uri,
         )
-    except Exception:
+    except MailError as exc:
+        result = OAUTH_EXCHANGE_RESULTS.get(exc.code, "failed")
+        logger.warning("Mailbox OAuth exchange failed: backend=%s reason=%s", backend_id, result)
+        return account_id, result
+    except Exception as exc:
+        logger.error(
+            "Mailbox OAuth exchange raised unexpectedly: backend=%s exception_type=%s",
+            backend_id,
+            type(exc).__name__,
+        )
         return account_id, "failed"
     try:
         authorized_email = token.authorized_email.strip()
@@ -469,6 +488,11 @@ def complete_manual(request: Request, callback_url, account_id):
         "expired": "授权地址已过期或已使用，请重新生成授权地址",
         "changed": "账号或授权工具已变化，请重新生成授权地址",
         "mismatch": "授权邮箱与当前账号不一致",
+        "code_invalid": "授权码无效或已使用，请重新生成授权地址并完成登录",
+        "client_invalid": "OAuth 应用配置无效，请检查 Client ID 与应用权限",
+        "permission_denied": "OAuth 应用权限不足，请重新授权所需邮箱权限",
+        "profile_denied": "无法读取授权邮箱信息，请检查应用的用户资料权限",
+        "network": "连接 Microsoft 服务失败，请稍后重新授权",
         "failed": "Outlook 授权失败，请检查授权地址和应用权限",
     }
     codes = {
@@ -476,6 +500,11 @@ def complete_manual(request: Request, callback_url, account_id):
         "expired": 409,
         "changed": 409,
         "mismatch": 422,
+        "code_invalid": 422,
+        "client_invalid": 422,
+        "permission_denied": 422,
+        "profile_denied": 422,
+        "network": 502,
         "failed": 502,
     }
     raise HTTPException(codes.get(result, 502), messages.get(result, "授权失败"))

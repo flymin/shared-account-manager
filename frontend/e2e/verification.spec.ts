@@ -474,6 +474,7 @@ test.describe("verification with synthetic APIs", () => {
     await page.getByRole("button", { name: "详情", exact: true }).click();
     await page.getByRole("button", { name: "开始手动授权" }).click();
     await expect(page.getByLabel("授权网址")).toBeVisible();
+    await expect(page.locator(".ant-modal").getByLabel("Client ID")).toHaveCount(0);
     await expect(page.getByRole("link", { name: "在新标签页打开授权网址" })).toBeVisible();
     await page
       .getByLabel("登录后的完整跳转地址")

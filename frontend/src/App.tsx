@@ -111,6 +111,11 @@ export default function App() {
       expired: "OAuth 授权已过期，请重新开始",
       changed: "账号配置已变化，请重新开始授权",
       login_required: "管理员登录已失效，请重新登录后授权",
+      code_invalid: "授权码无效或已使用，请重新开始授权",
+      client_invalid: "OAuth 应用配置无效，请检查 Client ID 与应用权限",
+      permission_denied: "OAuth 应用权限不足，请重新授权所需邮箱权限",
+      profile_denied: "无法读取授权邮箱信息，请检查应用的用户资料权限",
+      network: "连接 Microsoft 服务失败，请稍后重新授权",
       failed: "邮箱 OAuth 授权失败，请检查应用配置后重试",
     };
     if (messages[result]) {

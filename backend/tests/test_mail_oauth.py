@@ -11,6 +11,7 @@ from app.db import Session
 from app.email_worker import EmailWorker, lease_next
 from app.models import EmailCodeRun, MailOAuthCredential, MailOAuthState
 from app.plugins import MAIL_BACKENDS
+from app.mail import MailError
 from app.plugins.backends.outlook import OAuthToken, OutlookGraphClient
 from test_email_worker import start
 
@@ -128,6 +129,53 @@ def test_manual_callback_rejects_malformed_url_without_server_error(
         json={"callback_url": callback_url},
     )
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize("mode", ["outlook_manual", "outlook"])
+def test_oauth_code_error_is_actionable_for_both_flows(
+    admin, make_account, register_tool, monkeypatch, mode
+):
+    (outlook_manual_tool if mode == "outlook_manual" else outlook_tool)(register_tool)
+    if mode == "outlook_manual":
+        monkeypatch.setenv("OUTLOOK_MANUAL_CLIENT_ID", "fictional-public-client")
+    account = make_account(email="fixture@outlook.com", mail_tool=mode)
+    provider = MAIL_BACKENDS[mode].oauth_provider
+
+    def rejected_code(**kwargs):
+        raise MailError("oauth_code_invalid")
+
+    monkeypatch.setattr(provider, "exchange_code", rejected_code)
+    if mode == "outlook_manual":
+        started = admin.post(
+            f"/api/v1/accounts/{account['id']}/mail-oauth/manual/authorize"
+        )
+    else:
+        monkeypatch.setattr(config, "PUBLIC_ORIGIN", "https://example.test")
+        started = admin.post(
+            f"/api/v1/accounts/{account['id']}/mail-oauth/authorize",
+            json={"client_id": "fictional-client"},
+        )
+    assert started.status_code == 200
+    state = parse_qs(urlsplit(started.json()["authorization_url"]).query)["state"][0]
+    if mode == "outlook_manual":
+        response = admin.post(
+            f"/api/v1/accounts/{account['id']}/mail-oauth/manual/complete",
+            json={"callback_url": "https://localhost?" + urlencode({
+                "code": "fictional-code", "state": state,
+            })},
+        )
+        assert response.status_code == 422
+        assert "授权码无效或已使用" in response.json()["detail"]
+    else:
+        response = admin.get(
+            "/api/v1/mail-oauth/callback",
+            params={"state": state, "code": "fictional-code"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert "mail_oauth=code_invalid" in response.headers["location"]
+    with Session() as db:
+        assert db.get(MailOAuthCredential, (account["id"], mode)) is None
 
 
 def test_admin_authorizes_outlook_without_overwriting_mailbox_password(

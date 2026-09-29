@@ -149,6 +149,8 @@ class OutlookOAuthProvider:
             raise MailError("network", True) from None
         if response.is_redirect:
             raise MailError("protocol")
+        if response.status_code == 429 or response.status_code >= 500:
+            raise MailError("network", True)
         return response
 
     def exchange_code(
@@ -217,6 +219,16 @@ class OutlookOAuthProvider:
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
             if response.status_code != 200:
+                try:
+                    error = response.json().get("error")
+                except (ValueError, AttributeError):
+                    error = None
+                if error == "invalid_grant":
+                    raise MailError("oauth_code_invalid")
+                if error in {"invalid_client", "unauthorized_client"}:
+                    raise MailError("oauth_client_invalid")
+                if error in {"invalid_scope", "consent_required", "access_denied"}:
+                    raise MailError("oauth_permission_denied")
                 raise MailError("authentication")
             try:
                 payload = response.json()
@@ -236,7 +248,7 @@ class OutlookOAuthProvider:
                 headers={"Authorization": "Bearer " + access_token},
             )
             if response.status_code in {401, 403}:
-                raise MailError("authentication")
+                raise MailError("oauth_profile_denied")
             if response.status_code != 200:
                 raise MailError("protocol")
             try:
