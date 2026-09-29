@@ -41,6 +41,7 @@ curl --fail http://localhost:8080/api/ready
 | `MAIL_CODE_SUBJECT_KEYWORD` | 空 | 六位数字验证码模板的主题必须包含的固定关键词，不区分大小写 |
 | `OUTLOOK_CODE_SENDER` | 空 | Outlook 工具使用的验证码发件人地址 |
 | `OUTLOOK_CODE_SUBJECT_KEYWORD` | 空 | Outlook 工具使用的验证码主题关键词 |
+| `OUTLOOK_MANUAL_CLIENT_ID` | 空 | 启用 Outlook manual 工具的部署级公共 Client ID |
 | `BUILD_NETWORK` | `default` | Docker 构建网络，必要时可设置为 `host` |
 | `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` | 当前环境 | 构建阶段使用的网络代理配置 |
 
@@ -92,6 +93,8 @@ MAIL_CODE_SUBJECT_KEYWORD=ExampleService
 内置取码工具通过上述环境变量为模板提供参数。未配置或规则无效时，该工具不能自动取码，后台不会访问邮箱。账号选择的“邮箱取码工具”同时决定邮箱后端和模板；清空选择则关闭自动取码。自定义组合可写入私有 TOML，并在 `.env` 中设置 `MAIL_TOOLS_CONFIG_PATH=../.local/mail-tools.toml`；它会替换内置工具配置。配置方式见[工具与插件指南](mail-plugins.md)，API 和 worker 必须使用相同的插件代码及配置。
 
 支持 OAuth 的邮箱工具使用账号详情中的授权流程完成配置。应用 Client ID、可选 Client Secret、租户和 refresh token 按账号加密保存，原始邮箱密码保持独立；部署环境只需提供 `PUBLIC_ORIGIN` 以生成固定回调地址。授权失败、取消或令牌失效时，自动取码会停用并提示管理员重新授权。
+
+内置的 `Outlook manual` 工具仅在设置 `OUTLOOK_MANUAL_CLIENT_ID` 后出现在账号导入和编辑选项中。它使用公共客户端和 `https://localhost` 回调：管理员在账号详情点击授权，打开生成的 Microsoft 登录网址，登录并授权后复制浏览器跳转到的完整地址粘贴回页面。服务端只接受绑定当前管理员会话、账号和一次性 state 的地址，换取的 refresh token 按账号加密保存；不需要也不保存 Client Secret。该工具请求 `User.Read`、`Mail.ReadWrite` 和 `offline_access`，用于校验邮箱身份、读取未读邮件、标记已读和持续刷新令牌。
 
 ## HTTPS 与反向代理
 

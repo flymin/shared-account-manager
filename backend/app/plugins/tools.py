@@ -76,7 +76,11 @@ def get_mail_tool(identity: str | None) -> MailTool | None:
         return None
     backend = MAIL_BACKENDS.get(definition.backend)
     template = EMAIL_TEMPLATES.get(definition.template)
-    if backend is None or template is None:
+    if (
+        backend is None
+        or template is None
+        or (backend.available is not None and not backend.available())
+    ):
         return None
     options = {
         key: os.getenv(value.env, "") if isinstance(value, EnvValue) else value

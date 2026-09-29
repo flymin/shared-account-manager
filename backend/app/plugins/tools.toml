@@ -21,3 +21,14 @@ revision = 1
 [tools.options]
 sender = { env = "OUTLOOK_CODE_SENDER" }
 subject_keyword = { env = "OUTLOOK_CODE_SUBJECT_KEYWORD" }
+
+[[tools]]
+id = "outlook_manual"
+name = "Outlook manual"
+backend = "outlook_manual"
+template = "six_digit_code"
+revision = 1
+
+[tools.options]
+sender = { env = "OUTLOOK_CODE_SENDER" }
+subject_keyword = { env = "OUTLOOK_CODE_SUBJECT_KEYWORD" }

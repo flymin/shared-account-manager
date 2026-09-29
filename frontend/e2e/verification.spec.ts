@@ -84,6 +84,7 @@ async function fixture(
     mailTools: [{ id: "mailcom", name: "mail.com" }],
     mailOAuth: {
       required: false,
+      mode: "callback" as "callback" | "manual",
       configured: false,
       status: "not_required",
       updated_at: null as string | null,
@@ -269,6 +270,30 @@ async function fixture(
           "https://login.example.test/authorize?state=synthetic-state",
         expires_at: new Date(stamp + 600000).toISOString(),
       });
+    if (
+      selected &&
+      path.endsWith("/mail-oauth/manual/authorize") &&
+      method === "POST"
+    )
+      return send({
+        authorization_url:
+          "https://login.example.test/authorize?state=manual-state&redirect_uri=https%3A%2F%2Flocalhost",
+        expires_at: new Date(stamp + 600000).toISOString(),
+        redirect_uri: "https://localhost",
+      });
+    if (
+      selected &&
+      path.endsWith("/mail-oauth/manual/complete") &&
+      method === "POST"
+    ) {
+      state.mailOAuth = {
+        ...state.mailOAuth,
+        configured: true,
+        status: "active",
+      };
+      state.emailAvailable = true;
+      return send({ status: "success", account_id: selected.id });
+    }
     if (selected && path.endsWith("/mail-oauth") && method === "DELETE") {
       state.mailOAuth = {
         ...state.mailOAuth,
@@ -410,6 +435,7 @@ test.describe("verification with synthetic APIs", () => {
     f.state.mailTools.push({ id: "outlook", name: "Outlook 登录验证码" });
     f.state.mailOAuth = {
       required: true,
+      mode: "callback",
       configured: false,
       status: "not_configured",
       updated_at: null,
@@ -427,6 +453,35 @@ test.describe("verification with synthetic APIs", () => {
     await page.getByRole("button", { name: "取消", exact: true }).click();
   });
 
+  test("admin completes Outlook manual authorization by pasting localhost URL", async ({
+    page,
+  }) => {
+    const f = await fixture(page, { admin: true });
+    f.accounts[0].mail_tool = "outlook_manual";
+    f.accounts[0].mail_tool_name = "Outlook manual";
+    f.state.mailTools.push({ id: "outlook_manual", name: "Outlook manual" });
+    f.state.mailOAuth = {
+      required: true,
+      mode: "manual",
+      configured: false,
+      status: "not_configured",
+      updated_at: null,
+      version: 0,
+    };
+    f.state.emailAvailable = false;
+    await page.goto("/");
+    await navigation(page, "账号管理");
+    await page.getByRole("button", { name: "详情", exact: true }).click();
+    await page.getByRole("button", { name: "开始手动授权" }).click();
+    await expect(page.getByLabel("授权网址")).toBeVisible();
+    await expect(page.getByRole("link", { name: "在新标签页打开授权网址" })).toBeVisible();
+    await page
+      .getByLabel("登录后的完整跳转地址")
+      .fill("https://localhost?code=fictional-code&state=manual-state");
+    await page.getByRole("button", { name: "完成授权" }).click();
+    await expect(page.getByText("Outlook manual 授权成功，自动获取验证码已启用")).toBeVisible();
+  });
+
   test("ordinary users can only see the unavailable reason for unconfigured Outlook OAuth", async ({
     page,
   }) => {
@@ -435,6 +490,7 @@ test.describe("verification with synthetic APIs", () => {
     f.accounts[0].mail_tool_name = "Outlook 登录验证码";
     f.state.mailOAuth = {
       required: true,
+      mode: "callback",
       configured: false,
       status: "not_configured",
       updated_at: null,

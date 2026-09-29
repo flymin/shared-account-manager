@@ -39,6 +39,7 @@ class OAuthProvider(Protocol):
     """Provider capability used by the account-scoped OAuth lifecycle."""
 
     backend_id: str
+    mode: str
 
     @staticmethod
     def validate_config(client_id, client_secret, tenant): ...
@@ -47,14 +48,14 @@ class OAuthProvider(Protocol):
     def pkce_pair(): ...
 
     def authorization_url(
-        self, *, client_id, tenant, redirect_uri, state, code_challenge
+        self, *, client_id, tenant, redirect_uri, state, code_challenge=None
     ): ...
 
     def exchange_code(
         self,
         *,
         code,
-        code_verifier,
+        code_verifier=None,
         client_id,
         client_secret,
         tenant,

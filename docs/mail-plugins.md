@@ -31,7 +31,7 @@ backend/app/
 
 ## 注册取码工具
 
-内置配置 `backend/app/plugins/tools.toml` 将邮箱后端与 `six_digit_code` 模板组合为工具。`mailcom` 工具保持原 ID 以兼容已有账号；`outlook` 工具需要配置匹配规则和 Microsoft Graph OAuth 后端。工具 ID 与后端 ID 属于不同的注册表，不要求相同。
+内置配置 `backend/app/plugins/tools.toml` 将邮箱后端与 `six_digit_code` 模板组合为工具。`mailcom` 工具保持原 ID 以兼容已有账号；`outlook` 工具使用服务端回调 + PKCE，`outlook_manual` 工具使用部署级公共 Client ID 和管理员粘贴 `https://localhost` 跳转地址。工具 ID 与后端 ID 属于不同的注册表，不要求相同。
 
 工具配置示例：
 
@@ -121,6 +121,8 @@ EMAIL_TEMPLATES["alphanumeric_code"] = EmailTemplatePlugin(
 授权状态、refresh token、Client Secret 和 PKCE 临时值不得写入日志、CSV、测试夹具或前端响应。访问令牌只存在于 worker 进程内；供应商轮换 refresh token 时由 worker 在版本校验后更新加密记录。管理员取消授权会清除该账号的 OAuth 凭据，切换到其他邮箱后端也会清理旧授权。
 
 Graph 后端使用授权应用的 delegated `Mail.ReadWrite`、`User.Read` 和 `offline_access` 权限，只读取收件箱未读消息，原文通过受限接口读取；标记已读使用写入前权限检查并读取确认。所有 provider 错误转换为稳定的 `MailError` 键，不向用户回显供应商响应。
+
+OAuth provider 可以声明不同的授权交互方式。回调型 provider 使用站点的固定 HTTPS 回调和 PKCE；手动型 provider 生成带一次性 state 的授权 URL，要求管理员粘贴完整的 `https://localhost?code=...&state=...` 地址，由服务端在受保护的 token endpoint 完成换 token。手动型 provider 必须校验回调 scheme、主机、路径、state、管理员会话、账号和配置版本，不能访问管理员粘贴的 URL。公共客户端不得使用 Client Secret；refresh token 仍按账号和后端 ID 独立保存。
 
 | 邮箱后端方法 | 约定 |
 | --- | --- |

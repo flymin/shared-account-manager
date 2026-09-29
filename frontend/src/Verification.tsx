@@ -17,6 +17,7 @@ type Status = {
   email_unavailable_reason: string | null;
   mail_oauth: {
     required: boolean;
+    mode?: "callback" | "manual";
     configured: boolean;
     status: string;
     updated_at: string | null;
@@ -83,6 +84,8 @@ export function Verification({
   const [oauthOpen, setOauthOpen] = useState(false);
   const [oauthSaving, setOauthSaving] = useState(false);
   const [oauthForm] = Form.useForm();
+  const [manualForm] = Form.useForm();
+  const [manualUrl, setManualUrl] = useState("");
   const [clock, setClock] = useState(Date.now());
   const alive = useRef(false),
     runId = useRef<string | null>(null);
@@ -90,6 +93,7 @@ export function Verification({
     currentRun = useRef<Run | null>(null);
   const session = useRef(getSessionVersion());
   const generation = useRef(0);
+  const oauthGeneration = useRef(0);
   const lifecycle = useRef(0);
   const mailConfigVersion = useRef<string | null>(null);
   const base = `/accounts/${accountId}`;
@@ -132,6 +136,7 @@ export function Verification({
             ...data,
             mail_oauth: data.mail_oauth || {
               required: false,
+              mode: "callback",
               configured: false,
               status: "not_required",
               updated_at: null,
@@ -200,12 +205,16 @@ export function Verification({
     };
     const leave = () => {
       generation.current += 1;
+      oauthGeneration.current += 1;
       lifecycle.current += 1;
       controller.abort();
       if (alive.current) {
         setRun(null);
         setStarting(false);
         setStatus(null);
+        setOauthSaving(false);
+        setOauthOpen(false);
+        setManualUrl("");
       }
       alive.current = false;
       if (runId.current && session.current === getSessionVersion())
@@ -299,12 +308,51 @@ export function Verification({
     }
   }
   function openOAuth() {
+    if (status?.mail_oauth.mode === "manual") {
+      void startManualOAuth();
+      return;
+    }
     oauthForm.setFieldsValue({
       client_id: "",
       client_secret: "",
       tenant: status?.mail_oauth.tenant || "consumers",
     });
     setOauthOpen(true);
+  }
+
+  async function startManualOAuth() {
+    const requestGeneration = ++oauthGeneration.current;
+    const requestSession = getSessionVersion();
+    setOauthSaving(true);
+    try {
+      const result = await api<{
+        authorization_url: string;
+        expires_at: string;
+        redirect_uri: string;
+      }>(`${base}/mail-oauth/manual/authorize`, "POST");
+      if (
+        !canUpdate() ||
+        requestSession !== getSessionVersion() ||
+        oauthGeneration.current !== requestGeneration
+      )
+        return;
+      setManualUrl(result.authorization_url);
+      manualForm.setFieldsValue({ callback_url: "" });
+      setOauthOpen(true);
+    } catch (e) {
+      if (
+        canUpdate() &&
+        requestSession === getSessionVersion() &&
+        oauthGeneration.current === requestGeneration
+      )
+        message.error((e as Error).message);
+    } finally {
+      if (
+        requestSession === getSessionVersion() &&
+        oauthGeneration.current === requestGeneration
+      )
+        setOauthSaving(false);
+    }
   }
   async function authorizeOAuth(values: {
     client_id: string;
@@ -330,7 +378,53 @@ export function Verification({
       setOauthSaving(false);
     }
   }
+
+  async function completeManual(values: { callback_url: string }) {
+    const requestGeneration = ++oauthGeneration.current;
+    const requestSession = getSessionVersion();
+    setOauthSaving(true);
+    try {
+      await api(`${base}/mail-oauth/manual/complete`, "POST", values);
+      if (
+        !canUpdate() ||
+        requestSession !== getSessionVersion() ||
+        oauthGeneration.current !== requestGeneration
+      )
+        return;
+      setOauthOpen(false);
+      setManualUrl("");
+      message.success("Outlook manual 授权成功，自动获取验证码已启用");
+      setStatus((value) =>
+        value
+          ? {
+              ...value,
+              email_available: true,
+              email_unavailable_reason: null,
+              mail_oauth: {
+                ...value.mail_oauth,
+                configured: true,
+                status: "active",
+              },
+            }
+          : value,
+      );
+    } catch (e) {
+      if (
+        canUpdate() &&
+        requestSession === getSessionVersion() &&
+        oauthGeneration.current === requestGeneration
+      )
+        message.error((e as Error).message);
+    } finally {
+      if (
+        requestSession === getSessionVersion() &&
+        oauthGeneration.current === requestGeneration
+      )
+        setOauthSaving(false);
+    }
+  }
   function revokeOAuth() {
+    if (oauthSaving) return;
     Modal.confirm({
       title: "取消邮箱 OAuth 授权？",
       content: "将清除该账号保存的 OAuth 凭据，之后需要重新授权才能自动获取邮箱验证码。",
@@ -338,6 +432,8 @@ export function Verification({
       okButtonProps: { danger: true },
       cancelText: "保留授权",
       onOk: async () => {
+        oauthGeneration.current += 1;
+        setOauthOpen(false);
         try {
           await api(`${base}/mail-oauth`, "DELETE");
           message.success("邮箱 OAuth 授权已取消");
@@ -379,9 +475,11 @@ export function Verification({
                 </span>
                 {manageMailOAuth && status.mail_oauth.required && (
                   <Button onClick={openOAuth} disabled={oauthSaving}>
-                    {status.mail_oauth.status === "not_configured"
-                      ? "配置邮箱 OAuth"
-                      : "重新授权"}
+                    {status.mail_oauth.mode === "manual"
+                      ? "开始手动授权"
+                      : status.mail_oauth.status === "not_configured"
+                        ? "配置邮箱 OAuth"
+                        : "重新授权"}
                   </Button>
                 )}
               </>
@@ -444,7 +542,9 @@ export function Verification({
           <span className="muted">已取消获取。</span>
         )}
       </div>
-      {manageMailOAuth && status?.mail_oauth.required && status.mail_oauth.status !== "not_configured" && (
+      {manageMailOAuth &&
+        status?.mail_oauth.required &&
+        status.mail_oauth.status !== "not_configured" && (
         <div className="verification-section mail-oauth-status">
           <div className="verification-heading">
             <strong>邮箱 OAuth</strong>
@@ -452,8 +552,12 @@ export function Verification({
               <Tag color={status.mail_oauth.configured ? "green" : "gold"}>
                 {status.mail_oauth.configured ? "已授权" : "需要重新授权"}
               </Tag>
-              <Button onClick={openOAuth}>重新授权</Button>
-              <Button danger onClick={revokeOAuth}>取消授权</Button>
+              <Button onClick={openOAuth} disabled={oauthSaving}>
+                重新授权
+              </Button>
+              <Button danger onClick={revokeOAuth} disabled={oauthSaving}>
+                取消授权
+              </Button>
             </Space>
           </div>
           <span className="muted">
@@ -462,23 +566,79 @@ export function Verification({
         </div>
       )}
       <Modal
-        title="配置邮箱 OAuth"
+        title={
+          status?.mail_oauth.mode === "manual"
+            ? "Outlook manual 授权"
+            : "配置邮箱 OAuth"
+        }
         open={oauthOpen}
-        onCancel={() => setOauthOpen(false)}
-        onOk={() => oauthForm.submit()}
-        okText="开始授权"
+        onCancel={() => {
+          if (oauthSaving) return;
+          oauthGeneration.current += 1;
+          setOauthSaving(false);
+          setOauthOpen(false);
+        }}
+        onOk={() =>
+          status?.mail_oauth.mode === "manual"
+            ? manualForm.submit()
+            : oauthForm.submit()
+        }
+        okText={status?.mail_oauth.mode === "manual" ? "完成授权" : "开始授权"}
         cancelText="取消"
         confirmLoading={oauthSaving}
+        maskClosable={!oauthSaving}
+        keyboard={!oauthSaving}
+        closable={!oauthSaving}
         destroyOnHidden
       >
-        <Alert
-          type="info"
-          showIcon
-          message="授权完成前不会启用自动获取邮箱验证码"
-          description="请使用与当前账号邮箱一致的 Microsoft 账号完成登录。Client Secret 可留空；原始邮箱密码保持独立，OAuth 凭据按账号加密保存。"
-          style={{ marginBottom: 16 }}
-        />
-        <Form form={oauthForm} layout="vertical" onFinish={authorizeOAuth}>
+        {status?.mail_oauth.mode === "manual" ? (
+          <>
+            <Alert
+              type="info"
+              showIcon
+              message="请在新标签页完成 Microsoft 登录，然后粘贴跳转地址"
+              description="授权链接使用 https://localhost 回调；页面打不开不影响授权，请直接复制浏览器地址栏中的完整地址。请确认登录邮箱与当前账号一致。"
+              style={{ marginBottom: 16 }}
+            />
+            <Form form={manualForm} layout="vertical" onFinish={completeManual}>
+              <Form.Item label="授权网址">
+                <Input
+                  readOnly
+                  value={manualUrl}
+                  onFocus={(event) => event.currentTarget.select()}
+                  addonAfter={<CopyButton value={manualUrl} label="授权网址" />}
+                />
+                <Button
+                  type="link"
+                  href={manualUrl || undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                  disabled={!manualUrl}
+                  style={{ paddingLeft: 0 }}
+                >
+                  在新标签页打开授权网址
+                </Button>
+              </Form.Item>
+              <Form.Item
+                name="callback_url"
+                label="登录后的完整跳转地址"
+                rules={[{ required: true, message: "请粘贴 https://localhost 跳转地址" }]}
+                extra="地址通常以 https://localhost?code= 开头，并包含 state 参数。"
+              >
+                <Input.TextArea rows={3} autoComplete="off" />
+              </Form.Item>
+            </Form>
+          </>
+        ) : (
+        <>
+          <Alert
+            type="info"
+            showIcon
+            message="授权完成前不会启用自动获取邮箱验证码"
+            description="请使用与当前账号邮箱一致的 Microsoft 账号完成登录。Client Secret 可留空；原始邮箱密码保持独立，OAuth 凭据按账号加密保存。"
+            style={{ marginBottom: 16 }}
+          />
+          <Form form={oauthForm} layout="vertical" onFinish={authorizeOAuth}>
           <Form.Item label="回调地址">
             <Input
               readOnly
@@ -519,7 +679,9 @@ export function Verification({
           >
             <Input autoComplete="off" />
           </Form.Item>
-        </Form>
+          </Form>
+        </>
+        )}
       </Modal>
       {status &&
         (["service"] as Kind[]).map((kind) => (

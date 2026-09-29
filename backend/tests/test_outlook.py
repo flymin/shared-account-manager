@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timedelta, timezone
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
@@ -8,6 +8,7 @@ import pytest
 from app.mail import Candidate, MailError, OAuthCredential, find_candidate
 from app.plugins.backends.outlook import (
     OutlookGraphClient,
+    OutlookManualOAuthProvider,
     OutlookOAuthProvider,
     pkce_pair,
     received_time,
@@ -188,6 +189,66 @@ def test_authorization_code_exchange_rejects_bad_redirect_uri():
             redirect_uri="http://example.test/api/v1/mail-oauth/callback",
             state="state",
             code_challenge="challenge",
+        )
+
+
+def test_manual_authorization_uses_public_client_and_localhost_redirect():
+    provider = OutlookManualOAuthProvider()
+    url = provider.authorization_url(
+        client_id="fictional-client",
+        tenant="common",
+        redirect_uri="https://localhost",
+        state="fictional-state",
+    )
+    query = parse_qs(urlsplit(url).query)
+    assert query["client_id"] == ["fictional-client"]
+    assert query["redirect_uri"] == ["https://localhost"]
+    assert query["state"] == ["fictional-state"]
+    assert query["response_type"] == ["code"]
+    assert "code_challenge" not in query
+    assert "https://graph.microsoft.com/User.Read" in query["scope"][0]
+    assert "https://graph.microsoft.com/Mail.ReadWrite" in query["scope"][0]
+    assert "offline_access" in query["scope"][0]
+
+
+def test_manual_authorization_code_exchange_omits_secret_and_pkce():
+    seen = {}
+
+    def transport(request):
+        seen[request.url.host + request.url.path] = request
+        if request.url.host == "login.microsoftonline.com":
+            fields = parse_qs(request.content.decode())
+            assert fields["grant_type"] == ["authorization_code"]
+            assert fields["client_id"] == ["fictional-client"]
+            assert fields["redirect_uri"] == ["https://localhost"]
+            assert "code_verifier" not in fields
+            assert "client_secret" not in fields
+            return httpx.Response(
+                200,
+                json={"access_token": "access", "refresh_token": "refresh"},
+            )
+        assert request.url.path == "/v1.0/me"
+        return httpx.Response(200, json={"mail": "fixture@outlook.com"})
+
+    provider = OutlookManualOAuthProvider(transport=httpx.MockTransport(transport))
+    token = provider.exchange_code(
+        code="fictional-code",
+        client_id="fictional-client",
+        tenant="common",
+        redirect_uri="https://localhost",
+    )
+    assert token.refresh_token == "refresh"
+    assert token.authorized_email == "fixture@outlook.com"
+
+
+@pytest.mark.parametrize(
+    "client_secret,tenant",
+    [("secret", "common"), (None, "consumers")],
+)
+def test_manual_provider_rejects_confidential_or_noncommon_config(client_secret, tenant):
+    with pytest.raises(MailError, match="configuration"):
+        OutlookManualOAuthProvider.validate_config(
+            "fictional-client", client_secret, tenant
         )
 
 

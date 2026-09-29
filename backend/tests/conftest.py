@@ -46,6 +46,9 @@ def database(monkeypatch):
     )
     monkeypatch.setenv("MAIL_CODE_SENDER", "noreply@login.example.test")
     monkeypatch.setenv("MAIL_CODE_SUBJECT_KEYWORD", "ExampleService")
+    monkeypatch.delenv("OUTLOOK_CODE_SENDER", raising=False)
+    monkeypatch.delenv("OUTLOOK_CODE_SUBJECT_KEYWORD", raising=False)
+    monkeypatch.delenv("OUTLOOK_MANUAL_CLIENT_ID", raising=False)
     monkeypatch.setattr(config, "LOGIN_RATE_PER_MINUTE", 30)
     monkeypatch.setattr(config, "LOGIN_BURST", 10)
     # Ignore deployment-specific tool catalogs in isolated tests.

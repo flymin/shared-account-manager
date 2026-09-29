@@ -279,6 +279,9 @@ class MailOAuthState(Base):
     client_secret_encrypted: Mapped[str | None] = mapped_column(Text)
     tenant: Mapped[str] = mapped_column(String(128))
     code_verifier_encrypted: Mapped[str] = mapped_column(Text)
+    # The callback flow uses the public API callback; manual public-client flow
+    # uses https://localhost and submits the resulting URL in the UI.
+    redirect_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

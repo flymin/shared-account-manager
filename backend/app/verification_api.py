@@ -9,7 +9,7 @@ from . import auth, domain as d, mail_oauth, totp, verification as v
 from .config import cipher
 from .db import get_db, Session
 from .models import TwoFactor, now
-from .schemas import Input, MailOAuthInput
+from .schemas import Input, ManualMailOAuthInput, MailOAuthInput
 
 router = APIRouter(prefix="/api/v1/accounts/{account_id}")
 oauth_router = APIRouter(prefix="/api/v1")
@@ -60,6 +60,25 @@ def revoke_mail_oauth(
     db=Depends(get_db, scope="function"),
 ):
     return mail_oauth.revoke(db, user, account_id)
+
+
+@router.post("/mail-oauth/manual/authorize")
+def authorize_manual_mail_oauth(
+    account_id: str,
+    request: Request,
+    user=Depends(auth.admin),
+    db=Depends(get_db, scope="function"),
+):
+    return mail_oauth.begin_manual(db, user, request.state.login_session, account_id)
+
+
+@router.post("/mail-oauth/manual/complete")
+def complete_manual_mail_oauth(
+    account_id: str,
+    data: ManualMailOAuthInput,
+    request: Request,
+):
+    return mail_oauth.complete_manual(request, data.callback_url, account_id)
 
 
 @router.get("/email-code-runs/{run_id}")

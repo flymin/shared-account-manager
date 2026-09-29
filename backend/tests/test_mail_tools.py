@@ -30,6 +30,26 @@ def test_plugins_can_be_imported_without_a_tool_catalog(tmp_path):
     )
 
 
+def test_manual_outlook_tool_requires_deployment_client_id(
+    admin, monkeypatch, register_tool
+):
+    register_tool(
+        "outlook_manual",
+        backend="outlook_manual",
+        name="Example manual OAuth mailbox",
+    )
+    monkeypatch.delenv("OUTLOOK_MANUAL_CLIENT_ID", raising=False)
+    assert not any(
+        item["id"] == "outlook_manual"
+        for item in admin.get("/api/v1/mail-tools").json()["items"]
+    )
+    monkeypatch.setenv("OUTLOOK_MANUAL_CLIENT_ID", "fictional-public-client")
+    assert any(
+        item["id"] == "outlook_manual"
+        for item in admin.get("/api/v1/mail-tools").json()["items"]
+    )
+
+
 def test_file_catalog_registers_named_combinations_without_exposing_options(
     admin, make_account, monkeypatch, tmp_path
 ):

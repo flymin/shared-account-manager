@@ -190,3 +190,7 @@ class MailOAuthInput(Input):
     client_id: str = Field(min_length=1, max_length=256)
     client_secret: str | None = Field(default=None, max_length=512)
     tenant: str = Field(default="consumers", min_length=1, max_length=128)
+
+
+class ManualMailOAuthInput(Input):
+    callback_url: str = Field(min_length=1, max_length=8192)

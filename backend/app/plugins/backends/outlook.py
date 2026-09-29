@@ -26,7 +26,10 @@ GRAPH_HOST = "graph.microsoft.com"
 TOKEN_HOST = "login.microsoftonline.com"
 UA = "AccountManagerMailbox/1.0"
 MAX_BODY = 2 * 1024 * 1024
-SCOPES = "https://graph.microsoft.com/Mail.ReadWrite User.Read offline_access"
+SCOPES = (
+    "https://graph.microsoft.com/User.Read "
+    "https://graph.microsoft.com/Mail.ReadWrite offline_access"
+)
 TENANT_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,128}")
 
 
@@ -67,6 +70,7 @@ class OutlookOAuthProvider:
     """OAuth authorization-code + PKCE implementation for Microsoft Graph."""
 
     backend_id = "outlook"
+    mode = "callback"
     pkce_pair = staticmethod(pkce_pair)
 
     def __init__(self, *, transport=None):
@@ -160,7 +164,38 @@ class OutlookOAuthProvider:
         client_id, client_secret, tenant = self.validate_config(
             client_id, client_secret, tenant
         )
-        if not isinstance(code, str) or not code or not isinstance(code_verifier, str):
+        if (
+            not isinstance(code, str)
+            or not code
+            or not isinstance(code_verifier, str)
+            or not code_verifier
+        ):
+            raise MailError("configuration")
+        return self._exchange_code(
+            code=code,
+            code_verifier=code_verifier,
+            client_id=client_id,
+            client_secret=client_secret,
+            tenant=tenant,
+            redirect_uri=redirect_uri,
+        )
+
+    def _exchange_code(
+        self,
+        *,
+        code,
+        code_verifier,
+        client_id,
+        client_secret,
+        tenant,
+        redirect_uri,
+    ):
+        client_id, client_secret, tenant = self.validate_config(
+            client_id, client_secret, tenant
+        )
+        if not isinstance(code, str) or not code or (
+            code_verifier is not None and not isinstance(code_verifier, str)
+        ):
             raise MailError("configuration")
         with httpx.Client(headers={"User-Agent": UA}, transport=self.transport) as client:
             data = {
@@ -168,9 +203,10 @@ class OutlookOAuthProvider:
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
-                "code_verifier": code_verifier,
                 "scope": SCOPES,
             }
+            if code_verifier:
+                data["code_verifier"] = code_verifier
             if client_secret:
                 data["client_secret"] = client_secret
             response = self._request(
@@ -211,6 +247,64 @@ class OutlookOAuthProvider:
             if not isinstance(address, str) or not address.strip():
                 raise MailError("authentication")
             return OAuthToken(refresh_token, address.strip().lower())
+
+
+class OutlookManualOAuthProvider(OutlookOAuthProvider):
+    """Public-client flow where an administrator pastes the localhost URL.
+
+    This deliberately has a different backend identity from the callback/PKCE
+    flow so credentials and tool changes can never be mixed accidentally.
+    """
+
+    backend_id = "outlook_manual"
+    mode = "manual"
+    redirect_uri = "https://localhost"
+
+    @staticmethod
+    def validate_config(client_id, client_secret, tenant):
+        client_id, client_secret, tenant = OutlookOAuthProvider.validate_config(
+            client_id, client_secret, tenant
+        )
+        if client_secret is not None or tenant != "common":
+            raise MailError("configuration")
+        return client_id, None, tenant
+
+    def authorization_url(
+        self, *, client_id, tenant, redirect_uri, state, code_challenge=None
+    ):
+        client_id, _, tenant = self.validate_config(client_id, None, tenant)
+        if redirect_uri != self.redirect_uri:
+            raise MailError("configuration")
+        params = {
+            "client_id": client_id,
+            "response_type": "code",
+            "redirect_uri": self.redirect_uri,
+            "response_mode": "query",
+            "scope": SCOPES,
+            "state": state,
+        }
+        return f"{TOKEN_BASE}/{tenant}/oauth2/v2.0/authorize?{urlencode(params)}"
+
+    def exchange_code(
+        self,
+        *,
+        code,
+        code_verifier=None,
+        client_id,
+        client_secret=None,
+        tenant="common",
+        redirect_uri=None,
+    ):
+        if redirect_uri != self.redirect_uri or code_verifier:
+            raise MailError("configuration")
+        return self._exchange_code(
+            code=code,
+            code_verifier=None,
+            client_id=client_id,
+            client_secret=None,
+            tenant=tenant,
+            redirect_uri=self.redirect_uri,
+        )
 
 
 class OutlookGraphClient:

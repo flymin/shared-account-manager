@@ -1,5 +1,5 @@
 import hashlib
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 import pytest
@@ -22,6 +22,112 @@ def outlook_tool(register_tool):
         name="Example OAuth mailbox",
         options={"sender": "noreply@login.example.test", "subject_keyword": "Example"},
     )
+
+
+def outlook_manual_tool(register_tool):
+    register_tool(
+        "outlook_manual",
+        backend="outlook_manual",
+        name="Example manual OAuth mailbox",
+        options={"sender": "noreply@login.example.test", "subject_keyword": "Example"},
+    )
+
+
+def test_admin_completes_manual_outlook_authorization_without_overwriting_password(
+    admin, make_account, register_tool, monkeypatch
+):
+    outlook_manual_tool(register_tool)
+    monkeypatch.setenv("OUTLOOK_MANUAL_CLIENT_ID", "fictional-public-client")
+    account = make_account(email="fixture@outlook.com", mail_tool="outlook_manual")
+    provider = MAIL_BACKENDS["outlook_manual"].oauth_provider
+    assert provider is not None
+    monkeypatch.setattr(
+        provider,
+        "exchange_code",
+        lambda **kwargs: OAuthToken("fictional-manual-refresh", "fixture@outlook.com"),
+    )
+
+    status = admin.get(f"/api/v1/accounts/{account['id']}/verification").json()
+    assert status["mail_oauth"]["mode"] == "manual"
+    assert status["email_available"] is False
+    started = admin.post(
+        f"/api/v1/accounts/{account['id']}/mail-oauth/manual/authorize"
+    )
+    assert started.status_code == 200, started.text
+    authorization_url = started.json()["authorization_url"]
+    query = parse_qs(urlsplit(authorization_url).query)
+    assert query["redirect_uri"] == ["https://localhost"]
+    assert "code_challenge" not in query
+    callback_url = "https://localhost?" + urlencode(
+        {"code": "fictional-code", "state": query["state"][0]}
+    )
+    completed = admin.post(
+        f"/api/v1/accounts/{account['id']}/mail-oauth/manual/complete",
+        json={"callback_url": callback_url},
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["status"] == "success"
+
+    with Session() as db:
+        credential = db.get(
+            MailOAuthCredential, (account["id"], "outlook_manual")
+        )
+        assert credential and credential.status == "active"
+        assert cipher().decrypt(credential.refresh_token_encrypted.encode()) == (
+            b"fictional-manual-refresh"
+        )
+        assert cipher().decrypt(credential.client_id_encrypted.encode()) == (
+            b"fictional-public-client"
+        )
+        assert not db.scalar(select(MailOAuthState))
+    assert admin.get(f"/api/v1/accounts/{account['id']}/verification").json()[
+        "email_available"
+    ] is True
+    assert admin.get(f"/api/v1/accounts/{account['id']}/credentials").json()[
+        "auth_password"
+    ] == "fictional-auth"
+
+
+def test_manual_callback_rejects_wrong_host_and_account_binding(
+    admin, make_account, register_tool, monkeypatch
+):
+    outlook_manual_tool(register_tool)
+    monkeypatch.setenv("OUTLOOK_MANUAL_CLIENT_ID", "fictional-public-client")
+    first = make_account(email="first@outlook.com", mail_tool="outlook_manual")
+    second = make_account(email="second@outlook.com", mail_tool="outlook_manual")
+    assert admin.post(
+        f"/api/v1/accounts/{first['id']}/mail-oauth/manual/complete",
+        json={"callback_url": "https://evil.example/?code=x&state=y"},
+    ).status_code == 422
+    started = admin.post(
+        f"/api/v1/accounts/{first['id']}/mail-oauth/manual/authorize"
+    )
+    state = parse_qs(urlsplit(started.json()["authorization_url"]).query)["state"][0]
+    callback_url = "https://localhost?" + urlencode(
+        {"code": "fictional-code", "state": state}
+    )
+    response = admin.post(
+        f"/api/v1/accounts/{second['id']}/mail-oauth/manual/complete",
+        json={"callback_url": callback_url},
+    )
+    assert response.status_code == 409
+    with Session() as db:
+        assert db.scalar(select(MailOAuthState)) is not None
+        assert db.get(MailOAuthCredential, (first["id"], "outlook_manual")) is None
+
+
+@pytest.mark.parametrize("callback_url", ["https://[", "https://localKhost/?code=x&state=y"])
+def test_manual_callback_rejects_malformed_url_without_server_error(
+    admin, make_account, register_tool, monkeypatch, callback_url
+):
+    outlook_manual_tool(register_tool)
+    monkeypatch.setenv("OUTLOOK_MANUAL_CLIENT_ID", "fictional-public-client")
+    account = make_account(email="fixture@outlook.com", mail_tool="outlook_manual")
+    response = admin.post(
+        f"/api/v1/accounts/{account['id']}/mail-oauth/manual/complete",
+        json={"callback_url": callback_url},
+    )
+    assert response.status_code == 422
 
 
 def test_admin_authorizes_outlook_without_overwriting_mailbox_password(
