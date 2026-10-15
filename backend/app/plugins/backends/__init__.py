@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import os
 
 from ...mail import Mailbox, OAuthCredential, OAuthProvider
+from .gmxcom import GMXComClient
 from .mailcom import MailComClient
 from .outlook import (
     OutlookGraphClient,
@@ -24,6 +25,7 @@ class MailBackendPlugin:
 
 MAIL_BACKENDS = {
     "mailcom": MailBackendPlugin("mailcom", "mail.com", MailComClient),
+    "gmxcom": MailBackendPlugin("gmxcom", "gmx.com", GMXComClient),
     "outlook": MailBackendPlugin(
         "outlook", "Outlook", OutlookGraphClient, OutlookOAuthProvider()
     ),

@@ -12,6 +12,17 @@ sender = { env = "MAIL_CODE_SENDER" }
 subject_keyword = { env = "MAIL_CODE_SUBJECT_KEYWORD" }
 
 [[tools]]
+id = "gmxcom"
+name = "gmx.com"
+backend = "gmxcom"
+template = "six_digit_code"
+revision = 1
+
+[tools.options]
+sender = { env = "MAIL_CODE_SENDER" }
+subject_keyword = { env = "MAIL_CODE_SUBJECT_KEYWORD" }
+
+[[tools]]
 id = "outlook"
 name = "Outlook 登录验证码"
 backend = "outlook"

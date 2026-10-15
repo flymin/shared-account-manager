@@ -52,6 +52,9 @@ def json_script(document, identifier):
 
 
 class MailComClient:
+    home_url = "https://www.mail.com/"
+    provider_domains = ("mail.com",)
+
     def __init__(self, email, password, oauth=None, otp_uri=None, *, transport=None):
         # HTTPX INFO records include full bearer-bearing session URLs. These
         # library namespaces must never propagate into the worker's INFO log.
@@ -78,11 +81,14 @@ class MailComClient:
         self.tokens.clear()
         self.password = self.otp_uri = None
 
-    @staticmethod
-    def safe_url(url, method="GET"):
+    @classmethod
+    def safe_url(cls, url, method="GET"):
         parsed = urlsplit(url)
         host = parsed.hostname or ""
-        mail_host = host == "mail.com" or host.endswith(".mail.com")
+        mail_host = any(
+            host == domain or host.endswith("." + domain)
+            for domain in cls.provider_domains
+        )
         static_host = host == "uicdn.com" or host.endswith(".uicdn.com")
         if (
             parsed.scheme != "https"
@@ -157,7 +163,7 @@ class MailComClient:
         raise MailError("protocol")
 
     def login(self):
-        response = self.request("GET", "https://www.mail.com/")
+        response = self.request("GET", self.home_url)
         forms = [n for n in HTML(response.text).root.nodes() if n.tag == "form"]
         form = next(
             (
@@ -181,8 +187,8 @@ class MailComClient:
             urljoin(str(response.url), form.attrs.get("action", "")),
             data=fields,
             headers={
-                "Origin": "https://www.mail.com",
-                "Referer": "https://www.mail.com/",
+                "Origin": self.home_url.rstrip("/"),
+                "Referer": self.home_url,
             },
         )
         response = self.handle_totp(response)

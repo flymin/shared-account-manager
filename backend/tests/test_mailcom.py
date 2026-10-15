@@ -10,6 +10,7 @@ import pytest
 
 from app.mail import Candidate, MailError, find_candidate
 from app.plugins import get_mail_tool
+from app.plugins.backends.gmxcom import GMXComClient
 from app.plugins.backends.mailcom import MailComClient, receipt_time
 from test_email_templates import mail
 
@@ -21,8 +22,9 @@ def find_code(client, *args):
 class ProviderFixture:
     """Synthetic desktop protocol; never authenticates with a real provider."""
 
-    def __init__(self, stamp):
+    def __init__(self, stamp, domain="mail.com"):
         self.stamp = stamp
+        self.domain = domain
         self.read = False
         self.raw_calls = 0
         self.mark_calls = 0
@@ -35,22 +37,24 @@ class ProviderFixture:
 
     def __call__(self, req):
         path = req.url.path
-        if req.url.host == "www.mail.com":
+        if req.url.host == f"www.{self.domain}":
             return httpx.Response(
                 200,
-                text='<form action="https://login.mail.com/login"><input name="username"><input name="password"><input type="hidden" name="csrf" value="fictional-form-token"></form>',
+                text=f'<form action="https://login.{self.domain}/login"><input name="username"><input name="password"><input type="hidden" name="csrf" value="fictional-form-token"></form>',
             )
-        if req.url.host == "login.mail.com":
+        if req.url.host == f"login.{self.domain}":
             fields = parse_qs(req.content.decode())
             assert fields["username"] == ["fixture@example.test"]
             assert fields["csrf"] == ["fictional-form-token"]
+            assert req.headers["origin"] == f"https://www.{self.domain}"
+            assert req.headers["referer"] == f"https://www.{self.domain}/"
             return httpx.Response(
-                303, headers={"location": "https://navigator.mail.com/login"}
+                303, headers={"location": f"https://navigator.{self.domain}/login"}
             )
         if path == "/login":
             return httpx.Response(
                 200,
-                text='new FeatureDetection({"serverTests":{"browserversion":true,"notmobile":true},"redirectUrl":"https://navigator.mail.com/halogin"});',
+                text=f'new FeatureDetection({{"serverTests":{{"browserversion":true,"notmobile":true}},"redirectUrl":"https://navigator.{self.domain}/halogin"}});',
             )
         if path == "/halogin":
             assert req.url.params["tz"] == "0"
@@ -58,16 +62,16 @@ class ProviderFixture:
             return httpx.Response(
                 302,
                 headers={
-                    "location": "https://navigator.mail.com/?sid=fictional-session"
+                    "location": f"https://navigator.{self.domain}/?sid=fictional-session"
                 },
             )
-        if req.url.host == "navigator.mail.com":
+        if req.url.host == f"navigator.{self.domain}":
             config = {
                 "thirdParty": {
                     "navigator": {
                         "apps": {
                             "mail": {
-                                "url_map": {"default": "https://webmailer.mail.com/"}
+                                "url_map": {"default": f"https://webmailer.{self.domain}/"}
                             }
                         }
                     }
@@ -79,10 +83,10 @@ class ProviderFixture:
                 + json.dumps(config)
                 + "</script>",
             )
-        if req.url.host == "webmailer.mail.com":
+        if req.url.host == f"webmailer.{self.domain}":
             config = {
                 "fd": {
-                    name: {"src": f"https://dl.mail.com/{name}/component.js"}
+                    name: {"src": f"https://dl.{self.domain}/{name}/component.js"}
                     for name in ("list", "detail")
                 }
             }
@@ -92,28 +96,28 @@ class ProviderFixture:
                 + json.dumps(config)
                 + "</script>",
             )
-        if req.url.host == "dl.mail.com":
+        if req.url.host == f"dl.{self.domain}":
             config = {
                 "authentication": {
                     "clientId": "fictional-public-client",
                     "clientSecret": "fictional-public-credential",
-                    "oauthEndpointToken": "https://oauth.mail.com/token",
+                    "oauthEndpointToken": f"https://oauth.{self.domain}/token",
                 },
                 "features": {
                     "mailList": {
                         "endpoints": {
                             "getMails": {
-                                "url": "https://maillist.mail.com/Mailbox/Mail"
+                                "url": f"https://maillist.{self.domain}/Mailbox/Mail"
                             }
                         }
                     },
                     "mailBox": {
                         "endpoints": {
                             "getRawMail": {
-                                "url": "https://webmail.mail.com/rawmail/{mailId}"
+                                "url": f"https://webmail.{self.domain}/rawmail/{{mailId}}"
                             },
                             "updateMails": {
-                                "url": "https://webmail.mail.com/MailBatchUpdate"
+                                "url": f"https://webmail.{self.domain}/MailBatchUpdate"
                             },
                         }
                     },
@@ -169,8 +173,8 @@ class ProviderFixture:
         raise AssertionError("Unexpected synthetic provider route")
 
 
-def client_for(provider):
-    return MailComClient(
+def client_for(provider, client_type=MailComClient):
+    return client_type(
         "fixture@example.test",
         "fictional-mailbox-password",
         transport=httpx.MockTransport(provider),
@@ -203,6 +207,34 @@ def test_full_bootstrap_receipt_metadata_raw_read_and_explicit_mark():
         )
     finally:
         client.close()
+
+
+def test_gmx_composes_with_code_template_and_marks_only_matching_mail():
+    stamp = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(seconds=5)
+    provider = ProviderFixture(stamp, domain="gmx.com")
+    client = client_for(provider, GMXComClient)
+    try:
+        value = find_candidate(
+            client,
+            [get_mail_tool("gmxcom").template],
+            stamp - timedelta(minutes=2),
+            stamp + timedelta(minutes=5),
+            set(),
+        )
+        assert value == Candidate("fictional-id", "123456", stamp)
+        assert provider.raw_calls == 1 and not provider.read
+        client.mark_read(value.message_id)
+        assert provider.read and provider.mark_calls == 1
+        assert provider.tokens == ["mail_mailbox_r", "mail_mailbox_w"]
+    finally:
+        client.close()
+
+
+def test_gmx_rejects_cross_provider_urls():
+    assert GMXComClient.safe_url("https://webmail.gmx.com/")
+    for url in ("https://login.mail.com/", "https://gmx.com.example.test/"):
+        with pytest.raises(MailError, match="protocol"):
+            GMXComClient.safe_url(url)
 
 
 @pytest.mark.parametrize(

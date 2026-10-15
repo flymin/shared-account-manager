@@ -11,6 +11,7 @@ from app.email_worker import EmailWorker, lease_next, save_candidate, snapshot
 from app.mail import Candidate, find_candidate
 from app.models import Account, EmailCodeRun, Event, now
 from app.plugins import EmailTemplatePlugin, MailBackendPlugin
+from app.plugins.backends.gmxcom import GMXComClient
 from app.plugins.backends.mailcom import MailComClient
 from test_email_worker import Mailbox, start
 from test_mailcom import ProviderFixture
@@ -43,6 +44,7 @@ def test_catalog_and_write_permissions(admin, make_user, make_account, alternate
         "default": "mailcom",
         "items": [
             {"id": "mailcom", "name": "mail.com"},
+            {"id": "gmxcom", "name": "gmx.com"},
             {"id": "fixture", "name": "Fixture Mail"},
         ],
     }
@@ -62,7 +64,7 @@ def test_catalog_and_write_permissions(admin, make_user, make_account, alternate
         assert user.post("/api/v1" + path, json=data).status_code == 403
 
 
-@pytest.mark.parametrize("backend", ["mailcom", "fixture", None])
+@pytest.mark.parametrize("backend", ["mailcom", "gmxcom", "fixture", None])
 def test_batch_import_preview_and_individual_edit(admin, alternate, backend):
     data = {
         "tier": "20x",
@@ -79,7 +81,7 @@ def test_batch_import_preview_and_individual_edit(admin, alternate, backend):
     target = accounts[0]
     path = f"/api/v1/accounts/{target['id']}"
     assert admin.patch(path, json={"tier": "5x"}).json()["mail_tool"] == backend
-    for selected in (None, "fixture", "mailcom"):
+    for selected in (None, "fixture", "mailcom", "gmxcom"):
         result = admin.patch(path, json={"mail_tool": selected})
         assert result.status_code == 200
         assert result.json()["mail_tool"] == selected
@@ -265,7 +267,7 @@ def test_removed_plugin_fails_closed_without_fallback(
         assert db.get(Account, account["id"]).mail_tool == "fixture"
 
 
-@pytest.mark.parametrize("backend", ["mailcom", "fixture"])
+@pytest.mark.parametrize("backend", ["mailcom", "gmxcom", "fixture"])
 @pytest.mark.parametrize("template", ["six_digit_code", "fixture_b"])
 def test_registered_backends_and_templates_compose_independently(
     admin, make_account, alternate, monkeypatch, register_tool, backend, template
@@ -284,16 +286,21 @@ def test_registered_backends_and_templates_compose_independently(
             EmailTemplatePlugin("fixture_b", "Fixture B", lambda options: TemplateB()),
         )
         register_tool(backend, backend=backend, template="fixture_b", options={})
-    provider = ProviderFixture(now() - timedelta(seconds=1))
-    if backend == "mailcom":
+    provider = ProviderFixture(
+        now() - timedelta(seconds=1),
+        domain="gmx.com" if backend == "gmxcom" else "mail.com",
+    )
+    if backend in {"mailcom", "gmxcom"}:
         # Exercise the real adapter using only synthetic HTTP responses.
         monkeypatch.setitem(
             plugins.MAIL_BACKENDS,
-            "mailcom",
+            backend,
             MailBackendPlugin(
-                "mailcom",
-                "mail.com",
-                lambda email, password: MailComClient(
+                backend,
+                "gmx.com" if backend == "gmxcom" else "mail.com",
+                lambda email, password: (
+                    GMXComClient if backend == "gmxcom" else MailComClient
+                )(
                     email, password, transport=httpx.MockTransport(provider)
                 ),
             ),
@@ -311,7 +318,9 @@ def test_registered_backends_and_templates_compose_independently(
     assert result["status"] == "found"
     assert result["code"] == ("123456" if template == "six_digit_code" else "ABCD-1234")
     assert result["received_at"]
-    assert (provider.mark_calls if backend == "mailcom" else alternate[0].marks) == 1
+    assert (
+        provider.mark_calls if backend in {"mailcom", "gmxcom"} else alternate[0].marks
+    ) == 1
 
 
 def test_overlapping_templates_cannot_publish_conflicting_codes():
