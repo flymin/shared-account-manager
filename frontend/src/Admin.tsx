@@ -205,10 +205,14 @@ function ImportDialog({
               rows={6}
               autoComplete="off"
               spellCheck={false}
-              placeholder="账号邮箱----邮箱密码\n或账号邮箱----账号密码----邮箱密码"
+              placeholder="账号邮箱----邮箱密码\n或账号邮箱----账号密码----邮箱密码\n或账号邮箱----账号密码----邮箱密码----2FA密钥"
               maxLength={500000}
             />
           </Form.Item>
+          <p className="muted">
+            第四段可填写 Base32 TOTP 密钥或完整的 otpauth:// 链接，不能填写当前
+            6 位动态码。
+          </p>
           <Row gutter={16}>
             <Col xs={24} md={12}>
               <TierField label="本批账号类型" useDefault />
@@ -279,7 +283,8 @@ function ImportDialog({
               {preview.rows.map((r) => (
                 <div key={r.line}>
                   第 {r.line} 行 · {r.email} · {r.tier_name || r.tier} ·{" "}
-                  {r.mail_tool_name || "不启用自动取码"} · •••• / ••••
+                  {r.mail_tool_name || "不启用自动取码"} · •••• / •••• ·{" "}
+                  {r.two_factor_configured ? "2FA 已配置" : "未提供 2FA"}
                 </div>
               ))}
             </div>

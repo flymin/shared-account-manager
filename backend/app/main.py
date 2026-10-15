@@ -351,6 +351,7 @@ def preview_import(
                 "tier_name": d.option_name(d.settings(db), "tiers", data.tier),
                 "mail_tool": data.mail_tool,
                 "mail_tool_name": d.mail_tool_name(data.mail_tool),
+                "two_factor_configured": bool(row[4]),
             }
             for row in rows
         ],

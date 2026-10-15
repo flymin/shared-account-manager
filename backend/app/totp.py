@@ -1,9 +1,10 @@
 """QR validation and server-clock TOTP generation. No image or secret is logged."""
 
 import io
+import re
 import warnings
 from datetime import datetime, timezone
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import pyotp
 import zxingcpp
@@ -40,6 +41,23 @@ def parse_uri(uri):
         return value
     except Exception:
         raise InvalidQR("二维码必须包含有效的 TOTP 配置（不支持 HOTP）") from None
+
+
+def import_uri(value, email):
+    """Accept a Base32 TOTP secret or an authenticator provisioning URI."""
+    value = value.strip()
+    if value.startswith("otpauth://"):
+        uri = value
+    else:
+        secret = re.sub(r"\s+", "", value).upper()
+        if not re.fullmatch(r"[A-Z2-7=]{16,256}", secret):
+            raise InvalidQR("2FA 需填写 Base32 密钥或 otpauth:// 链接，不能填写当前动态码")
+        uri = f"otpauth://totp/{quote(email, safe='')}?secret={secret}"
+    try:
+        parse_uri(uri)
+    except InvalidQR:
+        raise InvalidQR("2FA 需填写有效的 TOTP 密钥或 otpauth:// 链接") from None
+    return uri
 
 
 def decode_image(data):

@@ -4,10 +4,12 @@ from threading import Barrier
 import pytest
 from sqlalchemy import select, func
 from fastapi.testclient import TestClient
+from app import totp
+from app.config import cipher
 from app.db import Session, write_lock
 from app.domain import reconcile
 from app.main import app
-from app.models import Account, Claim, Event, now
+from app.models import Account, Claim, Event, TwoFactor, now
 from conftest import PASSWORD, login
 
 P = "/api/v1"
@@ -538,6 +540,68 @@ def test_two_part_import_reuses_mailbox_password_for_account_login(admin):
         "password": "mailbox-only-password",
         "auth_password": "mailbox-only-password",
     }
+
+
+def test_four_part_import_configures_encrypted_totp_from_secret_or_uri(admin):
+    secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    uri = (
+        "otpauth://totp/Fictional:uri%40example.test"
+        f"?secret={secret}&issuer=Fictional"
+    )
+    grouped_secret = " ".join(secret.lower()[i : i + 4] for i in range(0, 32, 4))
+    payload = {
+        "tier": "5x",
+        "text": (
+            "plain@example.test----mailbox-only\n"
+            f"raw@example.test----vendor-secret----mailbox-secret----{grouped_secret}\n"
+            f"uri@example.test----vendor-uri----mailbox-uri----{uri}"
+        ),
+    }
+    preview = admin.post(P + "/account-imports/preview", json=payload)
+    assert preview.status_code == 200, preview.text
+    assert [row["two_factor_configured"] for row in preview.json()["rows"]] == [
+        False,
+        True,
+        True,
+    ]
+    assert secret not in preview.text and grouped_secret not in preview.text
+    response = admin.post(P + "/account-imports", json=payload)
+    assert response.status_code == 201, response.text
+    assert response.json() == {"count": 3}
+
+    accounts = {a["email"]: a for a in admin.get(P + "/accounts").json()}
+    with Session() as db:
+        assert db.get(TwoFactor, (accounts["plain@example.test"]["id"], "service")) is None
+        for email in ("raw@example.test", "uri@example.test"):
+            account_id = accounts[email]["id"]
+            saved = db.get(TwoFactor, (account_id, "service"))
+            assert saved is not None and saved.version == 1
+            assert secret not in saved.uri_encrypted
+            imported = cipher().decrypt(saved.uri_encrypted.encode()).decode()
+            assert totp.parse_uri(imported).secret == secret
+            status = admin.get(P + f"/accounts/{account_id}/verification")
+            assert status.json()["two_factor"]["service"]["configured"] is True
+            code = admin.get(P + f"/accounts/{account_id}/two-factor/service/code")
+            assert code.status_code == 200 and len(code.json()["code"]) == 6
+    audit = admin.get(P + "/audit-events").text
+    assert secret not in audit and secret.lower() not in audit
+
+
+def test_four_part_import_rejects_one_time_code_and_rolls_back(admin):
+    payload = {
+        "tier": "5x",
+        "text": (
+            "valid@example.test----vendor----mailbox\n"
+            "bad@example.test----vendor----mailbox----123456"
+        ),
+    }
+    preview = admin.post(P + "/account-imports/preview", json=payload)
+    assert [error["line"] for error in preview.json()["errors"]] == [2]
+    assert "动态码" in preview.json()["errors"][0]["message"]
+    response = admin.post(P + "/account-imports", json=payload)
+    assert response.status_code == 422
+    assert "123456" not in response.text
+    assert admin.get(P + "/accounts").json() == []
 
 
 def test_bad_acl_rolls_back_entire_import(admin):

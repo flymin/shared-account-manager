@@ -3,6 +3,7 @@ from datetime import timedelta
 from fastapi import HTTPException
 from sqlalchemy import select, delete, func, or_
 from .config import cipher
+from . import totp
 from .models import (
     Account,
     AccountNote,
@@ -14,6 +15,7 @@ from .models import (
     Settings,
     Claim,
     Event,
+    TwoFactor,
     now,
 )
 
@@ -575,11 +577,15 @@ def parse_import(db, data):
             # A two-part row uses the mailbox password for both services when
             # the account has no separate target-service password.
             password = auth_password
+            two_factor = None
         elif len(parts) == 3:
             email, password, auth_password = parts
+            two_factor = None
+        elif len(parts) == 4:
+            email, password, auth_password, two_factor = parts
         else:
             errors.append(
-                {"line": line_num, "message": "需要两段或三段内容，以 ---- 分隔"}
+                {"line": line_num, "message": "需要两段、三段或四段内容，以 ---- 分隔"}
             )
             continue
         email = email.strip().lower()
@@ -598,7 +604,12 @@ def parse_import(db, data):
         ):
             errors.append({"line": line_num, "message": "邮箱重复（包含已删除账号）"})
         else:
-            rows.append((line_num, email, password, auth_password))
+            try:
+                uri = totp.import_uri(two_factor, email) if two_factor is not None else None
+            except totp.InvalidQR as exc:
+                errors.append({"line": line_num, "message": str(exc)})
+            else:
+                rows.append((line_num, email, password, auth_password, uri))
         seen.add(email)
     if not seen and not errors:
         errors.append({"line": 1, "message": "请至少输入一个账号"})
@@ -612,7 +623,7 @@ def import_accounts(db, user, data):
             422, {"message": "请修正全部问题后重新导入", "errors": errors}
         )
     accounts = []
-    for _, email, password, auth_password in rows:
+    for _, email, password, auth_password, two_factor_uri in rows:
         a = Account(
             email=email,
             mail_tool=data.mail_tool,
@@ -638,6 +649,17 @@ def import_accounts(db, user, data):
                 "quota_reset_interval_days": data.quota_reset_interval_days,
             },
         )
+        if two_factor_uri:
+            db.add(
+                TwoFactor(
+                    account_id=a.id,
+                    kind="service",
+                    uri_encrypted=cipher().encrypt(two_factor_uri.encode()).decode(),
+                    version=1,
+                    updated_by=user.id,
+                )
+            )
+            event(db, "two_factor_updated", user, a, {"target": "service"})
         accounts.append(a)
     return accounts
 

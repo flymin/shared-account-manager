@@ -318,14 +318,16 @@ test("管理员通过界面创建组、用户并预览导入与编辑账号", as
     .fill(`${email}----UI-Test-Password!----UI-Test-Auth!\ninvalid`);
   await page.getByRole("button", { name: "检查并预览" }).click();
   await expect(
-    page.getByText("第 2 行：需要两段或三段内容，以 ---- 分隔"),
+    page.getByText("第 2 行：需要两段、三段或四段内容，以 ---- 分隔"),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "确认整批导入" }),
   ).toBeDisabled();
   await page
     .getByLabel("账号内容")
-    .fill(`${email}----UI-Test-Password!----UI-Test-Auth!`);
+    .fill(
+      `${email}----UI-Test-Password!----UI-Test-Auth!----GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ`,
+    );
   await page.getByLabel("授权用户组").click();
   await page.getByLabel("授权用户组").fill(name);
   await page
@@ -335,6 +337,7 @@ test("管理员通过界面创建组、用户并预览导入与编辑账号", as
   await page.getByLabel("账号内容").click();
   await page.getByRole("button", { name: "检查并预览" }).click();
   await expect(page.getByText("1 个账号检查通过")).toBeVisible();
+  await expect(page.locator(".import-preview")).toContainText("2FA 已配置");
   await page
     .locator(".ant-form-item")
     .filter({ has: page.locator('label[for="mail_tool"]') })
@@ -385,6 +388,10 @@ test("管理员通过界面创建组、用户并预览导入与编辑账号", as
   expect(a.quota_reset_interval_days).toBe(14);
   expect(a.mail_tool).toBe("mailcom");
   expect(a.group_ids).toHaveLength(1);
+  expect(
+    (await adminApi(`/accounts/${a.id}/verification`)).two_factor.service
+      .configured,
+  ).toBe(true);
   await page.getByRole("button", { name: "编辑", exact: true }).click();
   await expect(
     page.getByLabel("额度自动重置间隔（天，留空沿用全局）"),
