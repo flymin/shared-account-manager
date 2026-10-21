@@ -3,10 +3,9 @@ from datetime import timedelta
 from fastapi import HTTPException
 from sqlalchemy import select, delete, func, or_
 from .config import cipher
-from . import totp
+from . import totp, queries
 from .models import (
     Account,
-    AccountNote,
     AccountGroup,
     AccountUser,
     UserGroup,
@@ -17,6 +16,7 @@ from .models import (
     Event,
     TwoFactor,
     now,
+    uid,
 )
 
 
@@ -61,9 +61,12 @@ def validate_options_update(db, options):
     if db.scalar(select(Account.id).where(Account.tier.not_in(tiers)).limit(1)):
         fail("不能删除已被账号使用的类型，请改为停用", 422)
     categories = {item["id"] for item in options["anomaly_categories"]}
-    for used in db.scalars(select(Account.health_categories).distinct()):
-        if not set(used) <= categories:
-            fail("不能删除仍被异常记录使用的类别，请改为停用", 422)
+    if db.scalar(
+        select(Account.id)
+        .where(~Account.health_categories.contained_by(sorted(categories)))
+        .limit(1)
+    ):
+        fail("不能删除仍被异常记录使用的类别，请改为停用", 422)
 
 
 def anomaly_cooldown_hours(cfg, categories):
@@ -124,31 +127,11 @@ def active_claim(db, user_id, account_id):
 
 
 def user_dto(db, user):
-    return dict(
-        id=user.id,
-        username=user.username,
-        display_name=user.display_name,
-        role=user.role,
-        must_change_password=user.must_change_password,
-        claim_limit=user.claim_limit,
-        effective_claim_limit=user.claim_limit or settings(db).user_claim_limit,
-        claims_used=quota_used(db, user.id),
-        group_ids=list(
-            db.scalars(select(UserGroup.group_id).where(UserGroup.user_id == user.id))
-        ),
-    )
+    return queries.users_dto(db, [user])[0]
 
 
 def visible_clause(user_id):
-    groups = select(UserGroup.group_id).where(UserGroup.user_id == user_id)
-    return or_(
-        Account.id.in_(
-            select(AccountGroup.account_id).where(AccountGroup.group_id.in_(groups))
-        ),
-        Account.id.in_(
-            select(AccountUser.account_id).where(AccountUser.user_id == user_id)
-        ),
-    )
+    return queries.visible_clause(user_id)
 
 
 def can_view(db, user, account):
@@ -165,6 +148,8 @@ def get_account(db, user, account_id, feedback=False):
     account = db.get(Account, account_id)
     if not account or account.deleted:
         fail("账号不存在", 404)
+    if user.role == "admin":
+        return account
     owned = active_claim(db, user.id, account.id)
     if feedback and user.role != "admin" and not owned:
         fail("只有当前领用者可以操作", 403)
@@ -177,11 +162,10 @@ def set_links(db, model, key, identity, ids, value_key, target):
     if ids is None:
         return
     ids = set(ids)
-    found = set(db.scalars(select(target.id).where(target.id.in_(ids))))
+    query = select(target.id).where(target.id.in_(ids))
     if target is User:
-        found = set(
-            db.scalars(select(User.id).where(User.id.in_(ids), User.deleted.is_(False)))
-        )
+        query = query.where(User.deleted.is_(False))
+    found = set(db.scalars(query)) if ids else set()
     if found != ids:
         fail("选择的用户或用户组已不存在", 422)
     db.execute(delete(model).where(getattr(model, key) == identity))
@@ -191,18 +175,7 @@ def set_links(db, model, key, identity, ids, value_key, target):
 
 
 def group_dto(db, group):
-    return {
-        "id": group.id,
-        "name": group.name,
-        "user_ids": list(
-            db.scalars(
-                select(UserGroup.user_id)
-                .join(User, User.id == UserGroup.user_id)
-                .where(UserGroup.group_id == group.id, User.deleted.is_(False))
-                .order_by(UserGroup.user_id)
-            )
-        ),
-    }
+    return queries.groups_dto(db, [group])[0]
 
 
 def set_group_members(db, group, user_ids, actor):
@@ -232,157 +205,15 @@ def set_acl(db, account, group_ids, user_ids):
 
 
 def serialize_event(db, e, identities=False):
-    actor = db.get(User, e.actor_id) if e.actor_id else None
-    result = dict(
-        id=e.id,
-        account_id=e.account_id,
-        actor=actor.display_name if actor else "系统",
-        kind=e.kind,
-        details=e.details,
-        created_at=e.created_at,
-        target_user_id=e.target_user_id,
-    )
-    if identities:
-        account = db.get(Account, e.account_id) if e.account_id else None
-        target = db.get(User, e.target_user_id) if e.target_user_id else None
-        result.update(
-            account_email=account.email if account else None,
-            target_username=target.username if target else None,
-            target_display_name=target.display_name if target else None,
-        )
-    return result
+    return queries.event_dtos(db, [e], identities)[0]
 
 
 def account_dto(db, user, a, stamp=None):
-    stamp = stamp or now()
-    cfg = settings(db)
-    active = list(
-        db.scalars(
-            select(Claim).where(
-                Claim.account_id == a.id,
-                Claim.returned_at.is_(None),
-                Claim.invalidated_at.is_(None),
-            )
-        )
-    )
-    mine = db.scalar(
-        select(Claim).where(
-            Claim.account_id == a.id,
-            Claim.user_id == user.id,
-            Claim.returned_at.is_(None),
-        )
-    )
-    capacity = a.capacity or cfg.account_capacity
-    reasons = []
-    if quota_used(db, user.id) >= (user.claim_limit or cfg.user_claim_limit):
-        reasons.append("个人名额已满")
-    if len(active) >= capacity:
-        reasons.append("人数已满")
-    if a.disabled:
-        reasons.append("已停用")
-    if a.expires_at and a.expires_at <= stamp:
-        reasons.append("已过期")
-    if mine:
-        reasons.append("已领用，尚未归还")
-    if not can_view(db, user, a):
-        reasons.append("无新领用权限")
-    result = dict(
-        id=a.id,
-        email=a.email,
-        note_count=db.scalar(
-            select(func.count())
-            .select_from(AccountNote)
-            .where(AccountNote.account_id == a.id)
-        ),
-        mail_tool=a.mail_tool,
-        mail_tool_name=mail_tool_name(a.mail_tool),
-        tier=a.tier,
-        tier_name=option_name(cfg, "tiers", a.tier),
-        disabled=a.disabled,
-        created_at=a.created_at,
-        expires_at=a.expires_at,
-        capacity=a.capacity,
-        effective_capacity=capacity,
-        quota=a.quota,
-        quota_depleted=quota_depleted(a.quota, cfg),
-        reset_at=a.reset_at,
-        quota_reset_interval_days=a.quota_reset_interval_days,
-        quota_updated_at=a.quota_updated_at,
-        quota_source=a.quota_source,
-        health=a.health,
-        health_categories=a.health_categories,
-        health_category_names=[
-            option_name(cfg, "anomaly_categories", identity)
-            for identity in a.health_categories
-        ],
-        health_note=a.health_note,
-        health_version=a.health_version,
-        anomaly_since=a.anomaly_since,
-        can_claim=not reasons,
-        has_open_claim=bool(mine),
-        blocked_reasons=reasons,
-        active_count=len(active),
-        current_users=[db.get(User, c.user_id).display_name for c in active],
-    )
-    result["recent_updates"] = [
-        serialize_event(db, e)
-        for e in db.scalars(
-            select(Event)
-            .where(
-                Event.account_id == a.id,
-                Event.kind.in_(["quota_updated", "quota_reset"]),
-            )
-            .order_by(Event.id.desc())
-            .limit(3)
-        )
-    ]
-    if user.role == "admin":
-        result["group_ids"] = list(
-            db.scalars(
-                select(AccountGroup.group_id).where(AccountGroup.account_id == a.id)
-            )
-        )
-        result["user_ids"] = list(
-            db.scalars(
-                select(AccountUser.user_id)
-                .join(User, User.id == AccountUser.user_id)
-                .where(AccountUser.account_id == a.id, User.deleted.is_(False))
-            )
-        )
-    return result
+    return queries.accounts_dto(db, user, [a], stamp=stamp)[0]
 
 
 def claim_dto(db, user, claim):
-    a = db.get(Account, claim.account_id)
-    result = dict(
-        id=claim.id,
-        claimed_at=claim.claimed_at,
-        returned_at=claim.returned_at,
-        return_kind=claim.return_kind,
-        invalidated_at=claim.invalidated_at,
-        invalidation_kind=claim.invalidation_kind,
-        invalidation_reason=claim.invalidation_reason,
-    )
-    if user.role == "admin":
-        result.update(
-            user_id=claim.user_id,
-            user_name=db.get(User, claim.user_id).display_name,
-            account_id=a.id,
-            account_email=a.email,
-        )
-    if not claim.invalidated_at and not a.deleted:
-        if claim.returned_at:
-            result["account"] = {
-                "id": a.id,
-                "email": a.email,
-                "tier": a.tier,
-                "tier_name": option_name(settings(db), "tiers", a.tier),
-            }
-        else:
-            result["account"] = account_dto(db, user, a)
-    else:
-        result["account"] = None
-    return result
+    return queries.claims_dto(db, user, [claim])[0]
 
 
 def validate_reset(reset_at):
@@ -451,6 +282,7 @@ def health_report(db, a, actor, categories, note, *, maintain=False):
     )
     a.anomaly_since = now()
     a.health_version += 1
+    cfg = settings(db)
     event(
         db,
         "health_reported",
@@ -459,7 +291,7 @@ def health_report(db, a, actor, categories, note, *, maintain=False):
         {
             "categories": a.health_categories,
             "category_names": [
-                option_name(settings(db), "anomaly_categories", identity)
+                option_name(cfg, "anomaly_categories", identity)
                 for identity in a.health_categories
             ],
             "note": note,
@@ -479,9 +311,9 @@ def create_claim(db, user, data):
     a = get_account(db, user, data.account_id)
     db.refresh(a, with_for_update=True)
     db.refresh(user, with_for_update=True)
-    info = account_dto(db, user, a)
-    if not info["can_claim"]:
-        fail("；".join(info["blocked_reasons"]))
+    reasons = queries.claim_gate(db, user, a)
+    if reasons:
+        fail("；".join(reasons))
     if a.health == "abnormal" and not data.acknowledge_warning:
         fail("请确认异常提醒后再领用")
     c = Claim(
@@ -568,6 +400,14 @@ def parse_import(db, data):
     lines = data.text.splitlines()
     if len(lines) > 1000:
         fail("每批最多 1000 行", 422)
+    emails = {
+        line.split("----", 1)[0].strip().lower() for line in lines if "----" in line
+    }
+    existing = (
+        set(db.scalars(select(Account.email).where(Account.email.in_(emails))))
+        if emails
+        else set()
+    )
     for line_num, line in enumerate(lines, 1):
         if not line.strip():
             continue
@@ -599,13 +439,15 @@ def parse_import(db, data):
             errors.append(
                 {"line": line_num, "message": "两段密码不能为空且不得超过 256 字符"}
             )
-        elif email in seen or db.scalar(
-            select(Account.id).where(Account.email == email)
-        ):
+        elif email in seen or email in existing:
             errors.append({"line": line_num, "message": "邮箱重复（包含已删除账号）"})
         else:
             try:
-                uri = totp.import_uri(two_factor, email) if two_factor is not None else None
+                uri = (
+                    totp.import_uri(two_factor, email)
+                    if two_factor is not None
+                    else None
+                )
             except totp.InvalidQR as exc:
                 errors.append({"line": line_num, "message": str(exc)})
             else:
@@ -617,14 +459,31 @@ def parse_import(db, data):
 
 
 def import_accounts(db, user, data):
+    cfg = settings(db)
     rows, errors = parse_import(db, data)
     if errors:
         raise HTTPException(
             422, {"message": "请修正全部问题后重新导入", "errors": errors}
         )
+    group_ids, user_ids = set(data.group_ids), set(data.user_ids)
+    if (
+        group_ids
+        and set(db.scalars(select(Group.id).where(Group.id.in_(group_ids))))
+        != group_ids
+    ) or (
+        user_ids
+        and set(
+            db.scalars(
+                select(User.id).where(User.id.in_(user_ids), User.deleted.is_(False))
+            )
+        )
+        != user_ids
+    ):
+        fail("选择的用户或用户组已不存在", 422)
     accounts = []
     for _, email, password, auth_password, two_factor_uri in rows:
         a = Account(
+            id=uid(),
             email=email,
             mail_tool=data.mail_tool,
             tier=data.tier,
@@ -634,9 +493,17 @@ def import_accounts(db, user, data):
             password_encrypted=cipher().encrypt(password.encode()).decode(),
             auth_password_encrypted=cipher().encrypt(auth_password.encode()).decode(),
         )
-        db.add(a)
-        db.flush()
-        set_acl(db, a, data.group_ids, data.user_ids)
+        accounts.append(a)
+    db.add_all(accounts)
+    db.flush()
+    for a, row in zip(accounts, rows):
+        two_factor_uri = row[4]
+        db.add_all(
+            AccountGroup(account_id=a.id, group_id=gid) for gid in sorted(group_ids)
+        )
+        db.add_all(
+            AccountUser(account_id=a.id, user_id=uid) for uid in sorted(user_ids)
+        )
         event(
             db,
             "account_created",
@@ -644,7 +511,7 @@ def import_accounts(db, user, data):
             a,
             {
                 "tier": data.tier,
-                "tier_name": option_name(settings(db), "tiers", data.tier),
+                "tier_name": option_name(cfg, "tiers", data.tier),
                 "mail_tool": data.mail_tool,
                 "quota_reset_interval_days": data.quota_reset_interval_days,
             },
@@ -660,7 +527,7 @@ def import_accounts(db, user, data):
                 )
             )
             event(db, "two_factor_updated", user, a, {"target": "service"})
-        accounts.append(a)
+    db.flush()
     return accounts
 
 
@@ -669,11 +536,31 @@ def reconcile(db, stamp=None):
     cfg = settings(db)
     if not cfg:
         return
-    accounts = db.scalars(
-        select(Account).where(
-            Account.deleted.is_(False),
-            or_(Account.reset_at <= stamp, Account.health == "abnormal"),
+    accounts = list(
+        db.scalars(
+            select(Account).where(
+                Account.deleted.is_(False),
+                or_(Account.reset_at <= stamp, Account.health == "abnormal"),
+            )
         )
+    )
+    observed_ids = (
+        set(
+            db.scalars(
+                select(Claim.account_id)
+                .join(Account, Account.id == Claim.account_id)
+                .where(
+                    Claim.account_id.in_([a.id for a in accounts]),
+                    Claim.returned_at.is_(None),
+                    Claim.invalidated_at.is_(None),
+                    Claim.observed_health_version == Account.health_version,
+                    Claim.claimed_at <= stamp - timedelta(hours=cfg.observation_hours),
+                )
+                .distinct()
+            )
+        )
+        if accounts
+        else set()
     )
     for a in accounts:
         settle_quota_reset(db, a, stamp)
@@ -684,15 +571,7 @@ def reconcile(db, stamp=None):
             + timedelta(hours=anomaly_cooldown_hours(cfg, a.health_categories))
             <= stamp
         )
-        observed = db.scalar(
-            select(Claim.id).where(
-                Claim.account_id == a.id,
-                Claim.returned_at.is_(None),
-                Claim.invalidated_at.is_(None),
-                Claim.observed_health_version == a.health_version,
-                Claim.claimed_at <= stamp - timedelta(hours=cfg.observation_hours),
-            )
-        )
+        observed = a.id in observed_ids
         if cooled or observed:
             a.health = "possibly_recovered"
             event(

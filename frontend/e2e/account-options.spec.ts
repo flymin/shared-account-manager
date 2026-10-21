@@ -1,3 +1,4 @@
+import { fulfillApi } from "./list-fixtures";
 import { test, expect, type Page } from "@playwright/test";
 import type { Settings } from "../src/api";
 
@@ -84,7 +85,7 @@ async function fixture(page: Page, admin = true) {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace("/api/v1", "");
     const method = request.method();
-    const send = (json: unknown) => route.fulfill({ json });
+    const send = (json: unknown) => fulfillApi(route, { json });
     if (path === "/auth/me")
       return send({
         user: {
@@ -112,6 +113,8 @@ async function fixture(page: Page, admin = true) {
       return send(state.cfg);
     }
     if (path === "/accounts") return send([account()]);
+    if (path === "/accounts/example-account" && method === "GET")
+      return send(account());
     if (path === "/mail-tools") return send({ default: null, items: [] });
     if (path === "/account-imports/preview") {
       const data = request.postDataJSON();

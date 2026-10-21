@@ -1,5 +1,6 @@
 import csv
 import io
+from typing import Annotated, Literal
 from datetime import timedelta, timezone
 
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, Query
@@ -7,7 +8,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, delete, func, text, or_
 from sqlalchemy.exc import IntegrityError
-from . import auth, config, domain as d, schemas as s
+from sqlalchemy.orm import load_only
+from . import auth, config, queries, domain as d, schemas as s
 from .db import get_db
 from .models import (
     User,
@@ -165,20 +167,33 @@ def change_password(
 def accounts(
     user=Depends(auth.authenticate),
     db=Depends(get_db, scope="function"),
+    response: Response = None,
     scope: str = Query("all", pattern="^(all|hall)$"),
+    q: Annotated[str, Query(max_length=254)] = "",
+    tier: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    group_id: str | None = None,
+    statuses: Annotated[str | None, Query(max_length=150)] = None,
+    sort_by: Literal["email", "quota", "reset_at"] | None = None,
+    order: Literal["asc", "desc"] = "asc",
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
 ):
-    query = select(Account).where(Account.deleted.is_(False))
-    if scope == "hall":
-        query = query.where(
-            Account.disabled.is_(False),
-            or_(Account.expires_at.is_(None), Account.expires_at > now()),
-        )
-    if user.role != "admin":
-        query = query.where(d.visible_clause(user.id))
-    return [
-        d.account_dto(db, user, a)
-        for a in db.scalars(query.order_by(Account.created_at.desc()))
-    ]
+    rows, total = queries.account_page(
+        db,
+        user,
+        scope=scope,
+        q=q,
+        tier=tier,
+        group_id=group_id,
+        statuses=statuses,
+        sort_by=sort_by,
+        order=order,
+        offset=offset,
+        limit=limit,
+    )
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+    return rows
 
 
 @app.get("/api/v1/accounts/export.csv")
@@ -277,10 +292,9 @@ def events(
     query = select(Event).where(Event.account_id == account_id)
     if before is not None:
         query = query.where(Event.id < before)
-    return [
-        d.serialize_event(db, e)
-        for e in db.scalars(query.order_by(Event.id.desc()).limit(limit))
-    ]
+    return queries.event_dtos(
+        db, db.scalars(query.order_by(Event.id.desc()).limit(limit))
+    )
 
 
 def note_dto(note, author):
@@ -342,15 +356,18 @@ def preview_import(
     data: s.ImportInput, user=Depends(auth.admin), db=Depends(get_db, scope="function")
 ):
     rows, errors = d.parse_import(db, data)
+    cfg = d.settings(db)
+    tier_name = d.option_name(cfg, "tiers", data.tier)
+    tool_name = d.mail_tool_name(data.mail_tool)
     return {
         "rows": [
             {
                 "line": row[0],
                 "email": row[1],
                 "tier": data.tier,
-                "tier_name": d.option_name(d.settings(db), "tiers", data.tier),
+                "tier_name": tier_name,
                 "mail_tool": data.mail_tool,
-                "mail_tool_name": d.mail_tool_name(data.mail_tool),
+                "mail_tool_name": tool_name,
                 "two_factor_configured": bool(row[4]),
             }
             for row in rows
@@ -387,13 +404,9 @@ def update_account(
         a.mail_config_version += 1
     if "mail_tool" in values and a.mail_tool != data.mail_tool:
         db.execute(
-            delete(MailOAuthCredential).where(
-                MailOAuthCredential.account_id == a.id
-            )
+            delete(MailOAuthCredential).where(MailOAuthCredential.account_id == a.id)
         )
-        db.execute(
-            delete(MailOAuthState).where(MailOAuthState.account_id == a.id)
-        )
+        db.execute(delete(MailOAuthState).where(MailOAuthState.account_id == a.id))
     for field in (
         "tier",
         "capacity",
@@ -446,13 +459,9 @@ def delete_account(
     if not a.deleted:
         cancel_account_runs(db, a.id)
         db.execute(
-            delete(MailOAuthCredential).where(
-                MailOAuthCredential.account_id == a.id
-            )
+            delete(MailOAuthCredential).where(MailOAuthCredential.account_id == a.id)
         )
-        db.execute(
-            delete(MailOAuthState).where(MailOAuthState.account_id == a.id)
-        )
+        db.execute(delete(MailOAuthState).where(MailOAuthState.account_id == a.id))
         for c in db.scalars(
             select(Claim).where(Claim.account_id == a.id, Claim.returned_at.is_(None))
         ):
@@ -510,6 +519,7 @@ def claims(
     state: str = Query("all", pattern="^(all|active|pending)$"),
     tier: str | None = Query(None, min_length=1, max_length=64),
     group_id: str | None = None,
+    response: Response = None,
 ):
     query = (
         select(Claim)
@@ -545,12 +555,12 @@ def claims(
         query = query.where(Claim.returned_at.is_not(None))
     else:
         query = query.where(Claim.returned_at.is_(None))
-    return [
-        d.claim_dto(db, user, c)
-        for c in db.scalars(
-            query.order_by(Claim.claimed_at.desc()).offset(offset).limit(limit)
-        )
-    ]
+    rows, total = queries.page(
+        db, query.order_by(Claim.claimed_at.desc(), Claim.id.desc()), offset, limit
+    )
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+    return queries.claims_dto(db, user, rows)
 
 
 @app.post("/api/v1/claims", status_code=201)
@@ -589,13 +599,35 @@ def revoke(
 
 
 @app.get("/api/v1/users")
-def users(user=Depends(auth.admin), db=Depends(get_db, scope="function")):
-    return [
-        d.user_dto(db, u)
-        for u in db.scalars(
-            select(User).where(User.deleted.is_(False)).order_by(User.created_at)
+def users(
+    user=Depends(auth.admin),
+    db=Depends(get_db, scope="function"),
+    response: Response = None,
+    view: Literal["full", "options"] = "full",
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
+):
+    query = queries.user_columns(
+        select(User).where(User.deleted.is_(False)).order_by(User.created_at, User.id)
+    )
+    if view == "options":
+        query = (
+            select(User)
+            .options(
+                load_only(User.id, User.username, User.display_name, raiseload=True)
+            )
+            .where(User.deleted.is_(False))
+            .order_by(User.created_at, User.id)
         )
-    ]
+    rows, total = queries.page(db, query, offset, limit)
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+    if view == "options":
+        return [
+            dict(id=u.id, username=u.username, display_name=u.display_name)
+            for u in rows
+        ]
+    return queries.users_dto(db, rows)
 
 
 @app.post("/api/v1/users", status_code=201)
@@ -692,15 +724,32 @@ def delete_user(
         u.deleted = True
         db.execute(delete(AccountUser).where(AccountUser.user_id == u.id))
         db.execute(delete(UserGroup).where(UserGroup.user_id == u.id))
-        for c in db.scalars(
-            select(Claim).where(Claim.user_id == u.id, Claim.returned_at.is_(None))
-        ):
+        open_claims = list(
+            db.scalars(
+                select(Claim).where(Claim.user_id == u.id, Claim.returned_at.is_(None))
+            )
+        )
+        accounts = (
+            {
+                a.id: a
+                for a in db.scalars(
+                    queries.account_columns(
+                        select(Account).where(
+                            Account.id.in_({c.account_id for c in open_claims})
+                        )
+                    )
+                )
+            }
+            if open_claims
+            else {}
+        )
+        for c in open_claims:
             c.returned_at, c.return_kind = now(), "user_deleted"
             d.event(
                 db,
                 "returned",
                 user,
-                db.get(Account, c.account_id),
+                accounts[c.account_id],
                 {"claim_id": c.id, "kind": "user_deleted"},
                 target_user=u.id,
             )
@@ -710,8 +759,22 @@ def delete_user(
 
 
 @app.get("/api/v1/groups")
-def groups(user=Depends(auth.admin), db=Depends(get_db, scope="function")):
-    return [d.group_dto(db, g) for g in db.scalars(select(Group).order_by(Group.name))]
+def groups(
+    user=Depends(auth.admin),
+    db=Depends(get_db, scope="function"),
+    response: Response = None,
+    view: Literal["full", "options"] = "full",
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
+):
+    rows, total = queries.page(
+        db, select(Group).order_by(Group.name, Group.id), offset, limit
+    )
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+    if view == "options":
+        return [dict(id=g.id, name=g.name) for g in rows]
+    return queries.groups_dto(db, rows)
 
 
 @app.post("/api/v1/groups", status_code=201)
@@ -768,9 +831,8 @@ def account_options(
 
 @app.get("/api/v1/settings")
 def get_settings(user=Depends(auth.admin), db=Depends(get_db, scope="function")):
-    return {
-        field: getattr(d.settings(db), field) for field in s.SettingsInput.model_fields
-    }
+    cfg = d.settings(db)
+    return {field: getattr(cfg, field) for field in s.SettingsInput.model_fields}
 
 
 @app.put("/api/v1/settings")
@@ -795,17 +857,20 @@ def put_settings(
 def audit_subjects(user=Depends(auth.admin), db=Depends(get_db, scope="function")):
     return {
         "accounts": [
-            {"id": a.id, "email": a.email, "deleted": a.deleted}
-            for a in db.scalars(select(Account).order_by(Account.email))
+            dict(row._mapping)
+            for row in db.execute(
+                select(Account.id, Account.email, Account.deleted).order_by(
+                    Account.email
+                )
+            )
         ],
         "users": [
-            {
-                "id": u.id,
-                "username": u.username,
-                "display_name": u.display_name,
-                "deleted": u.deleted,
-            }
-            for u in db.scalars(select(User).order_by(User.username))
+            dict(row._mapping)
+            for row in db.execute(
+                select(
+                    User.id, User.username, User.display_name, User.deleted
+                ).order_by(User.username)
+            )
         ],
     }
 
@@ -828,43 +893,11 @@ def audit(
         query = query.where(
             (Event.actor_id == user_id) | (Event.target_user_id == user_id)
         )
-    return [
-        d.serialize_event(db, e, identities=True)
-        for e in db.scalars(query.order_by(Event.id.desc()).limit(limit))
-    ]
+    return queries.event_dtos(
+        db, db.scalars(query.order_by(Event.id.desc()).limit(limit)), identities=True
+    )
 
 
 @app.get("/api/v1/overview")
 def overview(user=Depends(auth.admin), db=Depends(get_db, scope="function")):
-    stamp = now()
-    accounts = list(db.scalars(select(Account).where(Account.deleted.is_(False))))
-    occupancy = dict(
-        db.execute(
-            select(Claim.account_id, func.count())
-            .where(Claim.returned_at.is_(None), Claim.invalidated_at.is_(None))
-            .group_by(Claim.account_id)
-        ).all()
-    )
-    cfg = d.settings(db)
-    default_capacity = cfg.account_capacity
-    return {
-        "accounts": len(accounts),
-        "available": sum(
-            not a.disabled
-            and occupancy.get(a.id, 0) < (a.capacity or default_capacity)
-            and (a.expires_at is None or a.expires_at > stamp)
-            for a in accounts
-        ),
-        "abnormal": sum(a.health == "abnormal" for a in accounts),
-        "disabled": sum(a.disabled for a in accounts),
-        "depleted": sum(d.quota_depleted(a.quota, cfg) for a in accounts),
-        "expired": sum(
-            a.expires_at is not None and a.expires_at <= stamp for a in accounts
-        ),
-        "active_claims": sum(occupancy.values()),
-        "pending_claims": db.scalar(
-            select(func.count())
-            .select_from(Claim)
-            .where(Claim.returned_at.is_(None), Claim.invalidated_at.is_not(None))
-        ),
-    }
+    return queries.overview(db)

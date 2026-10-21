@@ -1,3 +1,4 @@
+import { fulfillApi } from "./list-fixtures";
 import { test, expect, type Page } from "@playwright/test";
 import { defaultAccountOptions } from "./option-fixtures";
 
@@ -145,7 +146,7 @@ async function fixture(
     const method = request.method();
     requests.push({ path, method });
     const send = (body: unknown, status = 200) =>
-      route.fulfill({
+      fulfillApi(route, {
         status,
         contentType: "application/json",
         body: JSON.stringify(body),
@@ -186,6 +187,8 @@ async function fixture(
       });
     const accountId = path.split("/")[2];
     const selected = accounts.find((a) => a.id === accountId);
+    if (selected && path === `/accounts/${accountId}` && method === "GET")
+      return send(selected);
     if (selected && path === `/accounts/${accountId}` && method === "PATCH") {
       Object.assign(selected, request.postDataJSON());
       selected.mail_tool_name =
@@ -260,11 +263,7 @@ async function fixture(
         });
       return send(response);
     }
-    if (
-      selected &&
-      path.endsWith("/mail-oauth/authorize") &&
-      method === "POST"
-    )
+    if (selected && path.endsWith("/mail-oauth/authorize") && method === "POST")
       return send({
         authorization_url:
           "https://login.example.test/authorize?state=synthetic-state",
@@ -400,6 +399,28 @@ async function fixture(
 test.describe("verification with synthetic APIs", () => {
   test.use({ timezoneId: "America/New_York" });
 
+  test("reopening credentials always rechecks access instead of sharing cached secrets", async ({
+    page,
+  }) => {
+    const f = await fixture(page);
+    await f.openClaims();
+    await expect(
+      f.card().getByText("Synthetic-Account-Password", { exact: true }),
+    ).toBeVisible();
+    const previousReads = f.count("/credentials");
+    expect(previousReads).toBeGreaterThan(0);
+    await navigation(page, "账号大厅");
+    f.state.credentialsStatus = 403;
+    await navigation(page, "我的领用");
+    await expect
+      .poll(() => f.count("/credentials"))
+      .toBeGreaterThan(previousReads);
+    await expect(
+      f.card().getByText("Synthetic-Account-Password", { exact: true }),
+    ).toHaveCount(0);
+    await expect(f.card().getByText("测试凭据请求失败")).toBeVisible();
+  });
+
   test("admin selects a newly registered tool by its catalog ID", async ({
     page,
   }) => {
@@ -445,13 +466,23 @@ test.describe("verification with synthetic APIs", () => {
     await page.goto("/");
     await navigation(page, "账号管理");
     await page.getByRole("button", { name: "详情", exact: true }).click();
-    await expect(page.getByText("管理员尚未完成邮箱授权，请联系管理员")).toBeVisible();
+    await expect(
+      page.getByText("管理员尚未完成邮箱授权，请联系管理员"),
+    ).toBeVisible();
     await page.getByRole("button", { name: "配置邮箱 OAuth" }).click();
     const dialog = page.locator(".ant-modal");
-    await expect(dialog.getByText(f.accounts[0].email, { exact: true })).toBeVisible();
-    await expect(dialog.getByText("Synthetic-Mail-Password", { exact: true })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "复制账号" })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "复制邮箱密码" })).toBeVisible();
+    await expect(
+      dialog.getByText(f.accounts[0].email, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByText("Synthetic-Mail-Password", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "复制账号" }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "复制邮箱密码" }),
+    ).toBeVisible();
     await page.getByLabel("Client ID").fill("fictional-client");
     await expect(page.getByLabel("Client Secret（可选）")).toBeVisible();
     await expect(page.getByLabel("租户")).toHaveValue("consumers");
@@ -479,18 +510,32 @@ test.describe("verification with synthetic APIs", () => {
     await page.getByRole("button", { name: "详情", exact: true }).click();
     await page.getByRole("button", { name: "开始手动授权" }).click();
     const dialog = page.locator(".ant-modal");
-    await expect(dialog.getByText(f.accounts[0].email, { exact: true })).toBeVisible();
-    await expect(dialog.getByText("Synthetic-Mail-Password", { exact: true })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "复制账号" })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "复制邮箱密码" })).toBeVisible();
+    await expect(
+      dialog.getByText(f.accounts[0].email, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByText("Synthetic-Mail-Password", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "复制账号" }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "复制邮箱密码" }),
+    ).toBeVisible();
     await expect(page.getByLabel("授权网址")).toBeVisible();
-    await expect(page.locator(".ant-modal").getByLabel("Client ID")).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "在新标签页打开授权网址" })).toBeVisible();
+    await expect(
+      page.locator(".ant-modal").getByLabel("Client ID"),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: "在新标签页打开授权网址" }),
+    ).toBeVisible();
     await page
       .getByLabel("登录后的完整跳转地址")
       .fill("https://localhost?code=fictional-code&state=manual-state");
     await page.getByRole("button", { name: "完成授权" }).click();
-    await expect(page.getByText("Outlook manual 授权成功，自动获取验证码已启用")).toBeVisible();
+    await expect(
+      page.getByText("Outlook manual 授权成功，自动获取验证码已启用"),
+    ).toBeVisible();
   });
 
   test("ordinary users can only see the unavailable reason for unconfigured Outlook OAuth", async ({
@@ -510,9 +555,13 @@ test.describe("verification with synthetic APIs", () => {
     f.state.emailAvailable = false;
     await f.openClaims();
     await expect(
-      f.card().getByText("管理员尚未完成邮箱授权，请联系管理员", { exact: true }),
+      f
+        .card()
+        .getByText("管理员尚未完成邮箱授权，请联系管理员", { exact: true }),
     ).toBeVisible();
-    await expect(f.card().getByRole("button", { name: /配置邮箱 OAuth|重新授权/ })).toHaveCount(0);
+    await expect(
+      f.card().getByRole("button", { name: /配置邮箱 OAuth|重新授权/ }),
+    ).toHaveCount(0);
   });
 
   test("disabling mail fetching clears an already displayed code and keeps service 2FA", async ({
@@ -744,7 +793,7 @@ test.describe("verification with synthetic APIs", () => {
         await new Promise<void>((resolve) => {
           release = resolve;
         });
-        await route.fulfill({
+        await fulfillApi(route, {
           json: {
             server_time: TEST_TIME.toISOString(),
             email_available: true,

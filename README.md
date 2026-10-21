@@ -110,6 +110,7 @@ Web、API、后台任务和数据库分别运行。账号、权限、会话和�
 | [登录验证](docs/verification.md) | 邮箱验证码、邮件接收时间、账号 2FA 配置与刷新 |
 | [取码工具与插件](docs/mail-plugins.md) | 邮箱后端与模板接口、工具组合配置及测试约定 |
 | [部署与运维](docs/deployment.md) | 配置、镜像缓存、HTTPS、更新与备份恢复 |
+| [查询与性能](docs/performance.md) | 服务端筛选分页、批量查询规范、索引与基准测试 |
 | [架构与开发](docs/development.md) | 服务架构、REST API、本地开发、后端与浏览器测试 |
 
 REST API 位于 `/api/v1`，OpenAPI 定义位于 `/api/openapi.json`。测试使用独立数据库或测试部署，运行方法见[开发指南](docs/development.md)。

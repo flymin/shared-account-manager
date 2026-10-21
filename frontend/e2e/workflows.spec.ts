@@ -204,8 +204,10 @@ test("管理员维护 账号 2FA，领用者只能取码，取消后停止刷新
     await management
       .getByLabel("上传账号 2FA二维码")
       .setInputFiles("e2e/totp-fixture.png");
+    // In an inactive browser tab the loading icon's exit animation can linger
+    // in the accessible name even after the save has completed.
     await expect(
-      configPanel.getByRole("button", { name: "更新二维码", exact: true }),
+      configPanel.getByRole("button", { name: /更新二维码$/ }),
     ).toBeVisible();
     await expect(
       service.getByRole("button", { name: "显示 账号 2FA" }),
@@ -289,8 +291,20 @@ test("管理员通过界面创建组、用户并预览导入与编辑账号", as
     const next = page.locator(
       ".ant-pagination-next:not(.ant-pagination-disabled):visible",
     );
-    await expect(next).toBeVisible();
+    await expect
+      .poll(
+        async () =>
+          (await page.getByRole("cell", { name, exact: true }).count()) ||
+          (await next.count()),
+      )
+      .toBeGreaterThan(0);
+    if (await page.getByRole("cell", { name, exact: true }).count()) break;
+    const loaded = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v1/groups" && url.searchParams.has("limit");
+    });
     await next.click();
+    await loaded;
   }
   await expect(page.getByRole("cell", { name, exact: true })).toBeVisible();
   await page.getByRole("tab", { name: /^用户 ·/ }).click();

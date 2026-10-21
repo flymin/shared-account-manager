@@ -5,10 +5,21 @@ from datetime import timedelta
 from fastapi import HTTPException
 from sqlalchemy import delete, select
 
-from . import auth, domain as d, mail_oauth
+from . import auth, domain as d, mail_oauth, queries
 from .config import cipher
 from .plugins import get_mail_tool
-from .models import Account, EmailCodeRun, LoginSession, TwoFactor, User, now
+from .models import (
+    Account,
+    Claim,
+    EmailCodeRun,
+    LoginSession,
+    MailOAuthCredential,
+    TwoFactor,
+    User,
+    now,
+)
+
+_UNSET = object()
 
 ACTIVE = ("pending", "reading")
 ERRORS = {
@@ -27,10 +38,71 @@ ERRORS = {
 }
 
 
-def valid_owner(db, run, stamp):
-    user = db.get(User, run.user_id)
-    account = db.get(Account, run.account_id)
-    session = db.get(LoginSession, run.session_hash)
+def owner_batch(db, runs):
+    """Strong references for this reconciliation pass, never across lease phases."""
+    if not runs:
+        return None
+    account_ids = {run.account_id for run in runs}
+    user_ids = {run.user_id for run in runs}
+    return dict(
+        users={
+            u.id: u
+            for u in db.scalars(
+                queries.user_columns(select(User).where(User.id.in_(user_ids)))
+            )
+        },
+        accounts={
+            a.id: a
+            for a in db.scalars(
+                queries.account_columns(
+                    select(Account).where(Account.id.in_(account_ids))
+                )
+            )
+        },
+        sessions={
+            s.token_hash: s
+            for s in db.scalars(
+                select(LoginSession).where(
+                    LoginSession.token_hash.in_({run.session_hash for run in runs})
+                )
+            )
+        },
+        credentials={
+            (r.account_id, r.backend_id): r
+            for r in db.execute(
+                select(
+                    MailOAuthCredential.account_id,
+                    MailOAuthCredential.backend_id,
+                    MailOAuthCredential.status,
+                    MailOAuthCredential.authorized_email,
+                ).where(MailOAuthCredential.account_id.in_(account_ids))
+            )
+        },
+        active=set(
+            db.execute(
+                select(Claim.user_id, Claim.account_id).where(
+                    Claim.user_id.in_(user_ids),
+                    Claim.account_id.in_(account_ids),
+                    Claim.returned_at.is_(None),
+                    Claim.invalidated_at.is_(None),
+                )
+            ).all()
+        ),
+    )
+
+
+def valid_owner(db, run, stamp, owners=None, credential=_UNSET):
+    user = owners["users"].get(run.user_id) if owners else db.get(User, run.user_id)
+    account = (
+        owners["accounts"].get(run.account_id)
+        if owners
+        else db.get(Account, run.account_id)
+    )
+    session = (
+        owners["sessions"].get(run.session_hash)
+        if owners
+        else db.get(LoginSession, run.session_hash)
+    )
     tool = get_mail_tool(run.mail_tool)
     return bool(
         user
@@ -46,8 +118,22 @@ def valid_owner(db, run, stamp):
         and session
         and session.user_id == user.id
         and session.expires_at > stamp
-        and email_unavailable(account, db) is None
-        and (user.role == "admin" or d.active_claim(db, user.id, account.id))
+        and email_unavailable(
+            account,
+            db,
+            owners["credentials"].get((account.id, tool.backend.id))
+            if owners
+            else credential,
+        )
+        is None
+        and (
+            user.role == "admin"
+            or (
+                (user.id, account.id) in owners["active"]
+                if owners
+                else d.active_claim(db, user.id, account.id)
+            )
+        )
     )
 
 
@@ -73,7 +159,7 @@ def cancel_account_runs(db, account_id):
         finish(run, "cancelled")
 
 
-def email_unavailable(account, db=None):
+def email_unavailable(account, db=None, credential=_UNSET):
     if account.mail_tool is None:
         return "tool_disabled"
     tool = get_mail_tool(account.mail_tool)
@@ -84,10 +170,10 @@ def email_unavailable(account, db=None):
     if tool.backend.oauth_provider:
         if db is None:
             return "mail_oauth_required"
-        credential = db.get(
-            mail_oauth.MailOAuthCredential,
-            (account.id, tool.backend.id),
-        )
+        if credential is _UNSET:
+            credential = db.get(
+                mail_oauth.MailOAuthCredential, (account.id, tool.backend.id)
+            )
         if (
             not credential
             or credential.status != "active"
@@ -99,12 +185,16 @@ def email_unavailable(account, db=None):
 
 def reconcile_runs(db, stamp=None):
     stamp = stamp or now()
-    for run in db.scalars(
-        select(EmailCodeRun).where(EmailCodeRun.status.in_((*ACTIVE, "found")))
-    ):
+    runs = list(
+        db.scalars(
+            select(EmailCodeRun).where(EmailCodeRun.status.in_((*ACTIVE, "found")))
+        )
+    )
+    owners = owner_batch(db, [run for run in runs if run.deadline > stamp])
+    for run in runs:
         if run.deadline <= stamp:
             finish(run, "timed_out")
-        elif not valid_owner(db, run, stamp):
+        elif not valid_owner(db, run, stamp, owners):
             finish(run, "cancelled")
     # Retain message IDs for a day to prevent another job consuming the same
     # message after a cancelled/failed mark-read. Never retain expired codes.
@@ -135,15 +225,20 @@ def status(db, user, account_id):
     account = d.get_account(db, user, account_id, feedback=True)
     stamp = now()
     result = {"server_time": stamp, "two_factor": {}, "email": None}
-    unavailable = email_unavailable(account, db)
     tool = get_mail_tool(account.mail_tool)
+    credential = (
+        db.get(MailOAuthCredential, (account.id, tool.backend.id))
+        if tool and tool.backend.oauth_provider
+        else None
+    )
+    unavailable = email_unavailable(account, db, credential)
     result.update(
         email_config_version=account.mail_config_version,
         email_tool_revision=tool.config_hash if tool else None,
         email_available=unavailable is None,
         email_unavailable_reason=ERRORS.get(unavailable),
         mail_oauth=(
-            mail_oauth.status(db, account, user)
+            mail_oauth.status(db, account, user, credential)
             if tool and tool.backend.oauth_provider
             else {"required": False, "configured": False, "status": "not_required"}
         ),
@@ -162,7 +257,7 @@ def status(db, user, account_id):
             EmailCodeRun.deadline > stamp,
         )
     )
-    if run and valid_owner(db, run, stamp):
+    if run and valid_owner(db, run, stamp, credential=credential):
         owner = db.get(User, run.user_id)
         result["email"] = {
             "owner": owner.display_name,

@@ -33,6 +33,8 @@ import {
   type Claim,
   type Person,
   type Group,
+  type GroupOption,
+  type PersonOption,
   type Settings,
   type Audit,
 } from "./api";
@@ -43,7 +45,7 @@ import {
   TierField,
   useTierFilters,
 } from "./AccountOptions";
-import { Dialog, Events, fmt, iso, useResource } from "./ui";
+import { Dialog, Events, fmt, iso, useResource, usePageResource } from "./ui";
 const required = [{ required: true, message: "请填写此项" }];
 export function AdminAccounts({
   epoch,
@@ -54,8 +56,14 @@ export function AdminAccounts({
   refresh: () => void;
   user: Person;
 }) {
-  const { data: groups = [] } = useResource<Group[]>("/groups", epoch),
-    { data: users = [] } = useResource<Person[]>("/users", epoch);
+  const { data: groups = [] } = useResource<GroupOption[]>(
+      "/groups?view=options",
+      epoch,
+    ),
+    { data: users = [] } = useResource<PersonOption[]>(
+      "/users?view=options",
+      epoch,
+    );
   const [importOpen, setImportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const exportRequest = useRef<AbortController | null>(null);
@@ -142,8 +150,8 @@ function ImportDialog({
   onClose,
   refresh,
 }: {
-  groups: Group[];
-  users: Person[];
+  groups: GroupOption[];
+  users: PersonOption[];
   onClose: () => void;
   refresh: () => void;
 }) {
@@ -316,10 +324,39 @@ export function People({
   epoch: number;
   refresh: () => void;
 }) {
-  const { data: users = [], error } = useResource<Person[]>("/users", epoch),
-    { data: groups = [] } = useResource<Group[]>("/groups", epoch);
+  const [userPage, setUserPage] = useState(1),
+    [groupPage, setGroupPage] = useState(1);
+  const { data: userResult, error } = usePageResource<Person>(
+    `/users?offset=${(userPage - 1) * 10}&limit=10`,
+    epoch,
+  );
+  const { data: groupResult, error: groupError } = usePageResource<Group>(
+    `/groups?offset=${(groupPage - 1) * 10}&limit=10`,
+    epoch,
+  );
+  const users = userResult?.items ?? [],
+    groups = groupResult?.items ?? [];
+  const userTotal = userResult?.total ?? 0,
+    groupTotal = groupResult?.total ?? 0;
+  useEffect(() => {
+    if (userResult)
+      setUserPage((v) => Math.min(v, Math.max(1, Math.ceil(userTotal / 10))));
+  }, [userResult, userTotal]);
+  useEffect(() => {
+    if (groupResult)
+      setGroupPage((v) => Math.min(v, Math.max(1, Math.ceil(groupTotal / 10))));
+  }, [groupResult, groupTotal]);
   const [edit, setEdit] = useState<Person | "new">(),
     [groupEdit, setGroupEdit] = useState<Group | "new">();
+  const { data: groupOptions = [] } = useResource<GroupOption[]>(
+    "/groups?view=options",
+    epoch,
+  );
+  const { data: userOptions = [] } = useResource<PersonOption[]>(
+    groupEdit ? "/users?view=options" : null,
+    epoch,
+  );
+  const groupNames = new Map(groupOptions.map((g) => [g.id, g.name]));
   const { message, modal } = App.useApp();
   function removeUser(u: Person) {
     modal.confirm({
@@ -354,12 +391,14 @@ export function People({
   }
   return (
     <>
-      {error && <Alert type="error" message={error} />}
+      {(error || groupError) && (
+        <Alert type="error" message={error || groupError} />
+      )}
       <Tabs
         items={[
           {
             key: "users",
-            label: `用户 · ${users.length}`,
+            label: `用户 · ${userTotal}`,
             children: (
               <>
                 <div className="section-action">
@@ -374,6 +413,14 @@ export function People({
                 <Table
                   rowKey="id"
                   dataSource={users}
+                  loading={!userResult && !error}
+                  pagination={{
+                    current: userPage,
+                    pageSize: 10,
+                    total: userTotal,
+                    onChange: setUserPage,
+                    showSizeChanger: false,
+                  }}
                   scroll={{ x: 720 }}
                   columns={[
                     {
@@ -397,9 +444,7 @@ export function People({
                       title: "所属组",
                       render: (_, u) =>
                         u.group_ids.map((id) => (
-                          <Tag key={id}>
-                            {groups.find((g) => g.id === id)?.name || id}
-                          </Tag>
+                          <Tag key={id}>{groupNames.get(id) || id}</Tag>
                         )),
                     },
                     {
@@ -431,7 +476,7 @@ export function People({
           },
           {
             key: "groups",
-            label: `用户组 · ${groups.length}`,
+            label: `用户组 · ${groupTotal}`,
             children: (
               <>
                 <div className="section-action">
@@ -442,6 +487,14 @@ export function People({
                 <Table
                   rowKey="id"
                   dataSource={groups}
+                  loading={!groupResult && !groupError}
+                  pagination={{
+                    current: groupPage,
+                    pageSize: 10,
+                    total: groupTotal,
+                    onChange: setGroupPage,
+                    showSizeChanger: false,
+                  }}
                   columns={[
                     { title: "组名", dataIndex: "name" },
                     {
@@ -522,7 +575,10 @@ export function People({
               mode="multiple"
               showSearch
               optionFilterProp="label"
-              options={groups.map((g) => ({ value: g.id, label: g.name }))}
+              options={groupOptions.map((g) => ({
+                value: g.id,
+                label: g.name,
+              }))}
             />
           </Form.Item>
           <Form.Item name="claim_limit" label="领用数量上限（留空沿用全局）">
@@ -565,7 +621,7 @@ export function People({
               optionFilterProp="label"
               allowClear
               placeholder="搜索姓名或用户名"
-              options={users.map((u) => ({
+              options={userOptions.map((u) => ({
                 value: u.id,
                 label: `${u.display_name}（${u.username}）`,
               }))}
@@ -664,19 +720,38 @@ export function Dashboard({
     [tier, setTier] = useState("all"),
     [group, setGroup] = useState("all");
   const { message, modal } = App.useApp();
-  const { data: groups = [] } = useResource<Group[]>("/groups", epoch),
+  const { data: groups = [] } = useResource<GroupOption[]>(
+      "/groups?view=options",
+      epoch,
+    ),
     { data: overview = {}, error } = useResource<Record<string, number>>(
       "/overview",
       epoch,
     );
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    if (q === search) return;
+    const timer = setTimeout(() => {
+      setSearch(q);
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [q, search]);
   const path =
-    `/claims?scope=all&limit=50&offset=${page * 50}&q=${encodeURIComponent(q)}&state=${state}` +
+    `/claims?scope=all&limit=50&offset=${page * 50}&q=${encodeURIComponent(search)}&state=${state}` +
     (tier === "all" ? "" : `&tier=${encodeURIComponent(tier)}`) +
     (group === "all" ? "" : `&group_id=${group}`);
-  const { data: filtered = [], error: claimError } = useResource<Claim[]>(
+  const { data: claimResult, error: claimError } = usePageResource<Claim>(
     path,
     epoch,
   );
+  const searching = q !== search;
+  const filtered = searching ? [] : (claimResult?.items ?? []),
+    total = claimResult?.total ?? 0;
+  useEffect(() => {
+    if (claimResult && !searching)
+      setPage((v) => Math.min(v, Math.max(0, Math.ceil(total / 50) - 1)));
+  }, [claimResult, total, searching]);
   const stats = [
     ["账号总数", overview.accounts || 0],
     ["有空位且可领用", overview.available || 0],
@@ -732,7 +807,6 @@ export function Dashboard({
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
-              setPage(0);
             }}
           />
           <Select
@@ -771,6 +845,7 @@ export function Dashboard({
           pagination={false}
           rowKey="id"
           dataSource={filtered}
+          loading={(searching || !claimResult) && !claimError}
           scroll={{ x: 650 }}
           columns={[
             { title: "账号", dataIndex: "account_email" },
@@ -804,7 +879,7 @@ export function Dashboard({
           </Button>
           <span>第 {page + 1} 页</span>
           <Button
-            disabled={filtered.length < 50}
+            disabled={(page + 1) * 50 >= total}
             onClick={() => setPage((p) => p + 1)}
           >
             下一页

@@ -1,3 +1,4 @@
+import { fulfillApi } from "./list-fixtures";
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import { defaultAccountOptions } from "./option-fixtures";
 
@@ -35,7 +36,7 @@ async function openPicker(page: Page) {
     expect(route.request().method()).toBe("GET");
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/account-options"))
-      return route.fulfill({ json: defaultAccountOptions });
+      return fulfillApi(route, { json: defaultAccountOptions });
     const data = path.endsWith("/auth/me")
       ? {
           user: {
@@ -50,12 +51,17 @@ async function openPicker(page: Page) {
           },
           csrf_token: "fictional-time-token",
         }
-      : path.endsWith("/accounts")
-        ? [account]
-        : path.endsWith("/mail-tools")
-          ? { default: "mailcom", items: [{ id: "mailcom", name: "mail.com" }] }
-          : [];
-    await route.fulfill({ json: data });
+      : path.endsWith("/accounts/time-example")
+        ? account
+        : path.endsWith("/accounts")
+          ? [account]
+          : path.endsWith("/mail-tools")
+            ? {
+                default: "mailcom",
+                items: [{ id: "mailcom", name: "mail.com" }],
+              }
+            : [];
+    await fulfillApi(route, { json: data });
   });
   await page.goto("/");
   await expect(page.locator(".app-shell")).toBeVisible();

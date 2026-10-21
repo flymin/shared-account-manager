@@ -24,13 +24,18 @@ import {
   SearchOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { api, type Account, type Claim, type Person, type Group } from "./api";
+import {
+  api,
+  type Account,
+  type Claim,
+  type Person,
+  type GroupOption,
+  type PersonOption,
+} from "./api";
 import {
   accountStatus,
-  isInAccountHall,
   ALL_ACCOUNT_STATUSES,
   ALL_ADMIN_ACCOUNT_STATUSES,
-  compareAccounts,
   type AccountSort,
   type AccountStatus,
 } from "./accountList";
@@ -48,6 +53,7 @@ import {
   localDate,
   iso,
   useResource,
+  usePageResource,
 } from "./ui";
 function Expiry({ value }: { value?: string | null }) {
   if (!value) return <span className="account-expiry muted">不过期</span>;
@@ -78,8 +84,8 @@ export function AccountDialog({
   action: Action;
   onClose: () => void;
   refresh: () => void;
-  groups?: Group[];
-  users?: Person[];
+  groups?: GroupOption[];
+  users?: PersonOption[];
 }) {
   const { a, mode, claim } = action;
   const [kind, setKind] = useState("normal");
@@ -274,14 +280,10 @@ export function Pool({
   refresh: () => void;
   user: Person;
   adminMode?: boolean;
-  groups?: Group[];
-  users?: Person[];
+  groups?: GroupOption[];
+  users?: PersonOption[];
   toolbar?: ReactNode;
 }) {
-  const { data = [], error } = useResource<Account[]>(
-    adminMode ? "/accounts" : "/accounts?scope=hall",
-    epoch,
-  );
   const tierFilters = useTierFilters();
   const { message, modal } = App.useApp();
   const [q, setQ] = useState(""),
@@ -299,6 +301,34 @@ export function Pool({
   };
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    if (q === search) return;
+    const timer = setTimeout(() => {
+      setSearch(q);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [q, search]);
+  const params = new URLSearchParams({
+    scope: adminMode ? "all" : "hall",
+    q: search,
+    statuses: [...statuses].sort().join(","),
+    sort_by: effectiveSort.key,
+    order: effectiveSort.order === "ascend" ? "asc" : "desc",
+    offset: String((currentPage - 1) * pageSize),
+    limit: String(pageSize),
+  });
+  if (tier !== "all") params.set("tier", tier);
+  if (group !== "all") params.set("group_id", group);
+  const { data: result, error } = usePageResource<Account>(
+    `/accounts?${params}`,
+    epoch,
+  );
+  const total = result?.total ?? 0;
+  const searching = q !== search;
+  const loading = searching || !result;
+  const pageAccounts = searching ? [] : (result?.items ?? []);
   const [detail, setDetail] = useState<Account>(),
     [action, setAction] = useState<Action>();
   const groupNames = new Map(groups.map((g) => [g.id, g.name]));
@@ -337,22 +367,12 @@ export function Pool({
       </span>
     );
   }
-  const filtered = data
-    .filter(
-      (a) =>
-        (adminMode || isInAccountHall(a)) &&
-        a.email.toLowerCase().includes(q.toLowerCase()) &&
-        (tier === "all" || a.tier === tier) &&
-        (group === "all" || a.group_ids?.includes(group)) &&
-        statuses.includes(accountStatus(a)),
-    )
-    .sort((a, b) => compareAccounts(a, b, effectiveSort));
-  const pageCount = Math.ceil(filtered.length / pageSize);
-  const page = Math.min(currentPage, Math.max(1, pageCount));
-  const pageAccounts = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const pageCount = Math.ceil(total / pageSize);
+  const page = currentPage;
   useEffect(() => {
-    setCurrentPage((value) => Math.min(value, Math.max(1, pageCount)));
-  }, [pageCount]);
+    if (result && !searching)
+      setCurrentPage((value) => Math.min(value, Math.max(1, pageCount)));
+  }, [result, pageCount, searching]);
   async function claim(a: Account, ack = false) {
     try {
       await api("/claims", "POST", {
@@ -524,9 +544,10 @@ export function Pool({
       )}
     </Space>
   );
-  const currentDetail = detail
-    ? data.find((a) => a.id === detail.id)
-    : undefined;
+  const { data: currentDetail, error: detailError } = useResource<Account>(
+    detail ? `/accounts/${detail.id}` : null,
+    epoch,
+  );
   return (
     <>
       {error && <Alert type="error" message={error} showIcon />}
@@ -541,7 +562,6 @@ export function Pool({
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
-              setCurrentPage(1);
             }}
             allowClear
           />
@@ -590,8 +610,7 @@ export function Pool({
       <div className="list-caption">
         <div className="list-count-controls">
           <span>
-            {adminMode ? "账号资产" : "可见账号"}{" "}
-            <strong>{filtered.length}</strong>
+            {adminMode ? "账号资产" : "可见账号"} <strong>{total}</strong>
           </span>
           <span className="page-summary">
             每页 {pageSize} 个 · 共 {pageCount} 页
@@ -652,6 +671,7 @@ export function Pool({
             }
           }}
           pagination={false}
+          loading={loading && !error}
           scroll={{ x: adminMode ? 1440 : 1080 }}
           columns={[
             {
@@ -796,6 +816,7 @@ export function Pool({
         />
       </div>
       <div className="mobile-cards">
+        {loading && !error && <p role="status">正在加载账号…</p>}
         {pageAccounts.map((a) => (
           <Card key={a.id} className="account-card">
             <div className="card-top">
@@ -850,13 +871,13 @@ export function Pool({
             {actions(a)}
           </Card>
         ))}
-        {!filtered.length && <Empty description="暂无符合条件的账号" />}
+        {!loading && !total && <Empty description="暂无符合条件的账号" />}
       </div>
       <Pagination
         className="account-pagination"
         current={page}
         pageSize={pageSize}
-        total={filtered.length}
+        total={total}
         onChange={setCurrentPage}
         showSizeChanger={false}
         hideOnSinglePage
@@ -919,8 +940,10 @@ export function Pool({
             <h3>更新记录</h3>
             <EventHistory accountId={currentDetail.id} epoch={epoch} />
           </>
+        ) : detailError ? (
+          <Alert type="error" message={detailError} />
         ) : (
-          <Empty description="账号已删除或当前不可见" />
+          <p role="status">正在加载账号详情…</p>
         )}
       </Drawer>
       {action && (
@@ -945,10 +968,18 @@ export function MyClaims({
   history?: boolean;
 }) {
   const [page, setPage] = useState(0);
-  const { data = [], error } = useResource<Claim[]>(
+  const { data: result, error } = usePageResource<Claim>(
     `/claims?history=${history}&offset=${page * 50}&limit=50`,
     epoch,
   );
+  const data = result?.items ?? [];
+  const total = result?.total ?? 0;
+  useEffect(() => {
+    if (result)
+      setPage((value) =>
+        Math.min(value, Math.max(0, Math.ceil(total / 50) - 1)),
+      );
+  }, [result, total]);
   const [action, setAction] = useState<Action>();
   const { message, modal } = App.useApp();
   useEffect(() => {
@@ -1104,7 +1135,7 @@ export function MyClaims({
         </Button>
         <span>第 {page + 1} 页</span>
         <Button
-          disabled={data.length < 50}
+          disabled={(page + 1) * 50 >= total}
           onClick={() => setPage((p) => p + 1)}
         >
           下一页

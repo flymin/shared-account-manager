@@ -58,6 +58,7 @@ class UserGroup(Base):
     group_id: Mapped[str] = mapped_column(
         ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True
     )
+    __table_args__ = (Index("ix_user_groups_group_user", "group_id", "user_id"),)
 
 
 class Account(Base):
@@ -123,19 +124,23 @@ class AccountGroup(Base):
     group_id: Mapped[str] = mapped_column(
         ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True
     )
+    __table_args__ = (
+        Index("ix_account_groups_group_account", "group_id", "account_id"),
+    )
 
 
 class AccountUser(Base):
     __tablename__ = "account_users"
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    __table_args__ = (Index("ix_account_users_user_account", "user_id", "account_id"),)
 
 
 class Claim(Base):
     __tablename__ = "claims"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), index=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     observed_health_version: Mapped[int | None] = mapped_column(Integer)
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -144,6 +149,19 @@ class Claim(Base):
     returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     return_kind: Mapped[str | None] = mapped_column(String(30))
     __table_args__ = (
+        Index(
+            "ix_claims_user_claimed_id",
+            "user_id",
+            text("claimed_at DESC"),
+            text("id DESC"),
+        ),
+        Index("ix_claims_claimed_id", text("claimed_at DESC"), text("id DESC")),
+        Index(
+            "ix_claims_active_account_user",
+            "account_id",
+            "user_id",
+            postgresql_where=text("returned_at IS NULL AND invalidated_at IS NULL"),
+        ),
         Index(
             "uq_open_claim",
             "user_id",
@@ -156,10 +174,19 @@ class Claim(Base):
 
 class Event(Base):
     __tablename__ = "events"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    account_id: Mapped[str | None] = mapped_column(
-        ForeignKey("accounts.id"), index=True
+    __table_args__ = (
+        Index("ix_events_account_id_id", "account_id", text("id DESC")),
+        Index(
+            "ix_events_quota_account_id_id",
+            "account_id",
+            text("id DESC"),
+            postgresql_where=text("kind IN ('quota_updated', 'quota_reset')"),
+        ),
+        Index("ix_events_actor_id_id", "actor_id", text("id DESC")),
+        Index("ix_events_target_user_id_id", "target_user_id", text("id DESC")),
     )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id"))
     actor_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     target_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     kind: Mapped[str] = mapped_column(String(50))
@@ -285,9 +312,7 @@ class MailOAuthState(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    __table_args__ = (
-        Index("ix_mail_oauth_states_expires_at", "expires_at"),
-    )
+    __table_args__ = (Index("ix_mail_oauth_states_expires_at", "expires_at"),)
 
 
 class EmailCodeRun(Base):

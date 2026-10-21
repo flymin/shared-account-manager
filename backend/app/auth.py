@@ -31,10 +31,18 @@ def authenticate(request: Request, db=Depends(get_db, scope="function")):
 
 def authenticate_request(request: Request, db, *, lock_writes=True):
     token = request.cookies.get(COOKIE, "")
-    session = db.get(LoginSession, digest(token)) if token else None
+    pair = (
+        db.execute(
+            select(LoginSession, User)
+            .outerjoin(User, User.id == LoginSession.user_id)
+            .where(LoginSession.token_hash == digest(token))
+        ).one_or_none()
+        if token
+        else None
+    )
+    session, user = pair if pair else (None, None)
     if not session or session.expires_at <= now():
         raise HTTPException(401, "请先登录")
-    user = db.get(User, session.user_id)
     if not user or user.deleted:
         raise HTTPException(401, "登录已失效")
     if request.method not in {"GET", "HEAD", "OPTIONS"}:

@@ -27,6 +27,7 @@ from .models import (
 from .plugins import get_mail_tool
 from .schemas import MailOAuthInput
 
+_UNSET = object()
 STATE_TTL_SECONDS = 10 * 60
 logger = logging.getLogger(__name__)
 
@@ -70,10 +71,14 @@ def client_id_mask(value):
     return f"{value[:4]}…{value[-4:]}"
 
 
-def status(db, account, user):
+def status(db, account, user, credential=_UNSET):
     backend, _ = _provider(account)
     provider = backend.oauth_provider
-    row = db.get(MailOAuthCredential, (account.id, backend.id))
+    row = (
+        db.get(MailOAuthCredential, (account.id, backend.id))
+        if credential is _UNSET
+        else credential
+    )
     result = {
         "required": True,
         "mode": getattr(provider, "mode", "callback"),

@@ -103,6 +103,8 @@ flowchart LR
 
 `/api/docs` 提供 Swagger UI；生产 Web 的 CSP 禁止外部脚本，交互式 Swagger UI 应在受控开发环境中直接访问 API，或使用 OpenAPI 文件生成客户端。
 
+列表的服务端筛选、排序、分页参数、轻量目录与查询预算见[查询与性能](performance.md)。迁移 `0014` 增加自然邮箱排序规则及查询索引；JSON 数组响应和现有字段保持兼容。
+
 ## 本地前端开发
 
 需要 Node.js 22 与 npm。先启动测试用后端，再安装前端依赖：

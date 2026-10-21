@@ -26,6 +26,7 @@ import {
   getSessionVersion,
   type Account,
   type Audit,
+  type PageResult,
 } from "./api";
 import {
   accountStatus,
@@ -41,10 +42,109 @@ export const localDate = (v?: string | null) =>
   v ? dayjs(v).tz("Asia/Shanghai").format("YYYY-MM-DDTHH:mm") : "";
 export const iso = (v?: string) =>
   v ? dayjs.tz(v, "Asia/Shanghai").toISOString() : null;
-export function useResource<T>(path: string, epoch: number) {
+type ResourceRequest = {
+  controller: AbortController;
+  promise: Promise<unknown>;
+  subscribers: number;
+  pending: boolean;
+  epoch: number;
+};
+const resourceRequests = new Map<string, ResourceRequest>();
+const sharedResources = new Set([
+  "/accounts",
+  "/claims",
+  "/users",
+  "/groups",
+  "/account-options",
+  "/settings",
+  "/overview",
+  "/audit-subjects",
+  "/audit-events",
+]);
+window.addEventListener("session-changed", () => {
+  for (const request of resourceRequests.values()) request.controller.abort();
+  resourceRequests.clear();
+});
+function resourceRequest<T>(path: string, epoch: number, mode?: "page") {
+  // Credential and verification reads must always be independently authorized.
+  // Whitelist metadata rather than relying on a blacklist of secret endpoints.
+  if (!sharedResources.has(path.split("?", 1)[0])) {
+    const controller = new AbortController();
+    return {
+      promise: api<T>(path, "GET", undefined, {
+        signal: controller.signal,
+        responseType: mode,
+      }),
+      release: () => controller.abort(),
+    };
+  }
+  const version = getSessionVersion();
+  const key = JSON.stringify([version, epoch, mode, path]);
+  for (const [oldKey, request] of resourceRequests) {
+    if (
+      (request.epoch !== epoch || resourceRequests.size > 64) &&
+      request.subscribers === 0
+    ) {
+      request.controller.abort();
+      resourceRequests.delete(oldKey);
+    }
+  }
+  let request = resourceRequests.get(key);
+  if (!request) {
+    const controller = new AbortController();
+    const entry: ResourceRequest = {
+      controller,
+      subscribers: 0,
+      pending: true,
+      epoch,
+      promise: api<T>(path, "GET", undefined, {
+        signal: controller.signal,
+        responseType: mode,
+      }).then(
+        (value) => {
+          entry.pending = false;
+          return value;
+        },
+        (error) => {
+          entry.pending = false;
+          if (resourceRequests.get(key) === entry) resourceRequests.delete(key);
+          throw error;
+        },
+      ),
+    };
+    request = entry;
+    resourceRequests.set(key, entry);
+  }
+  const entry = request;
+  entry.subscribers += 1;
+  return {
+    promise: entry.promise as Promise<T>,
+    release: () => {
+      entry.subscribers -= 1;
+      queueMicrotask(() => {
+        if (
+          entry.subscribers === 0 &&
+          entry.pending &&
+          resourceRequests.get(key) === entry
+        ) {
+          entry.controller.abort();
+          resourceRequests.delete(key);
+        }
+      });
+    },
+  };
+}
+export function usePageResource<T>(path: string, epoch: number) {
+  return useResource<PageResult<T>>(path, epoch, "page");
+}
+export function useResource<T>(
+  path: string | null,
+  epoch: number,
+  mode?: "page",
+) {
   const [sessionVersion, setSessionVersion] = useState(getSessionVersion);
   const [result, setResult] = useState<{
-    path: string;
+    path: string | null;
     sessionVersion: number;
     data?: T;
     error: string;
@@ -61,10 +161,11 @@ export function useResource<T>(path: string, epoch: number) {
     return () => window.removeEventListener("session-changed", changed);
   }, [sessionVersion]);
   useEffect(() => {
+    if (path === null) return;
     let alive = true;
     const version = getSessionVersion();
-    const controller = new AbortController();
-    api<T>(path, "GET", undefined, { signal: controller.signal })
+    const request = resourceRequest<T>(path, epoch, mode);
+    request.promise
       .then((v) => {
         if (alive && version === getSessionVersion()) {
           setResult({ path, sessionVersion: version, data: v, error: "" });
@@ -87,9 +188,9 @@ export function useResource<T>(path: string, epoch: number) {
       });
     return () => {
       alive = false;
-      controller.abort();
+      request.release();
     };
-  }, [path, epoch, sessionVersion]);
+  }, [path, epoch, sessionVersion, mode]);
   const current =
     result.path === path && result.sessionVersion === getSessionVersion();
   return {

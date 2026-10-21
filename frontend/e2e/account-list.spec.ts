@@ -1,3 +1,4 @@
+import { fulfillApi } from "./list-fixtures";
 import { test, expect, type Page } from "@playwright/test";
 import type { Audit } from "../src/api";
 import { defaultAccountOptions } from "./option-fixtures";
@@ -86,7 +87,7 @@ async function openFixture(
     const path = new URL(route.request().url()).pathname.replace("/api/v1", "");
     expect(route.request().method()).toBe("GET");
     if (path === "/account-options")
-      return route.fulfill({ json: defaultAccountOptions });
+      return fulfillApi(route, { json: defaultAccountOptions });
     const user = {
       id: "viewer",
       username: "viewer",
@@ -98,6 +99,10 @@ async function openFixture(
       claims_used: personalFull ? 1 : 0,
       group_ids: [],
     };
+    if (/^\/accounts\/[^/]+$/.test(path) && path !== "/accounts/export.csv")
+      return fulfillApi(route, {
+        json: fixtures.find((a) => a.id === path.split("/")[2]),
+      });
     const data =
       path === "/auth/me"
         ? { user, csrf_token: "fictional-token" }
@@ -116,11 +121,11 @@ async function openFixture(
               }))
             : [];
     if (path === "/accounts/export.csv")
-      return route.fulfill({
+      return fulfillApi(route, {
         contentType: "text/csv",
         body: "\ufeff账号邮箱,登录密码,邮箱密码,账号类别,是否停用,是否设置 2FA\nalpha@example.test,test-pass,test-mail,5x,否,是\n",
       });
-    await route.fulfill({
+    await fulfillApi(route, {
       contentType: "application/json",
       body: JSON.stringify(data),
     });
@@ -153,6 +158,69 @@ async function rows(page: Page) {
         .locator(".desktop-table .ant-table-tbody .account-email")
         .allTextContents();
 }
+
+test("只请求当前页，快速搜索合并为一次服务端查询", async ({ page }) => {
+  const requests: URL[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/accounts") requests.push(url);
+  });
+  const fixtures = Array.from({ length: 60 }, (_, i) => ({
+    ...common,
+    id: `member-${i}`,
+    email: `member${i}@example.test`,
+  }));
+  await openFixture(page, false, fixtures);
+  expect(requests.at(-1)!.searchParams.get("limit")).toBe("20");
+  expect(requests.at(-1)!.searchParams.get("offset")).toBe("0");
+  expect((await rows(page)).length).toBe(20);
+  // Hold the debounce timer to verify old actions disappear immediately.
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
+  const input = page.getByRole("textbox", { name: "搜索账号邮箱" });
+  await input.fill("m");
+  await input.fill("member");
+  await input.fill("member2");
+  expect(await rows(page)).toHaveLength(0);
+  expect(requests.filter((url) => url.searchParams.get("q"))).toHaveLength(0);
+  await page.clock.resume();
+  await expect(page.locator(".list-caption strong")).toHaveText("11");
+  expect(requests.filter((url) => url.searchParams.get("q"))).toHaveLength(1);
+  expect(requests.at(-1)!.searchParams.get("q")).toBe("member2");
+});
+
+test("迟到的旧筛选响应不能覆盖当前查询", async ({ page }) => {
+  const fixtures = Array.from({ length: 60 }, (_, i) => ({
+    ...common,
+    id: `member-${i}`,
+    email: `member${i}@example.test`,
+  }));
+  await openFixture(page, false, fixtures);
+  let release!: () => void;
+  const delayed = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started = false;
+  await page.route("**/api/v1/accounts?**", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("q") !== "member1")
+      return route.fallback();
+    started = true;
+    await delayed;
+    await fulfillApi(route, { json: fixtures }).catch(() => {});
+  });
+  const input = page.getByRole("textbox", { name: "搜索账号邮箱" });
+  await input.fill("member1");
+  await expect.poll(() => started).toBeTruthy();
+  await input.fill("member2");
+  await expect(page.locator(".list-caption strong")).toHaveText("11");
+  release();
+  await expect
+    .poll(async () =>
+      (await rows(page)).every((value) => value.trim().startsWith("member2")),
+    )
+    .toBeTruthy();
+});
+
 async function sort(
   page: Page,
   field: "email" | "quota" | "reset_at",

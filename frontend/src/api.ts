@@ -23,7 +23,7 @@ export async function api<T = any>(
     signal?: AbortSignal;
     keepalive?: boolean;
     binary?: boolean;
-    responseType?: "blob";
+    responseType?: "blob" | "page";
   } = {},
 ): Promise<T> {
   const startedSession = sessionVersion;
@@ -69,8 +69,20 @@ export async function api<T = any>(
       response.status,
     );
   }
+  if (options.responseType === "page") {
+    const count = response.headers.get("X-Total-Count");
+    if (!Array.isArray(body) || count === null || !/^\d+$/.test(count))
+      throw new Error("分页信息无效，请刷新页面后重试");
+    return { items: body, total: Number(count) } as T;
+  }
   return body as T;
 }
+
+export type PageResult<T> = { items: T[]; total: number };
+export const apiPage = <T>(path: string, signal?: AbortSignal) =>
+  api<PageResult<T>>(path, "GET", undefined, { signal, responseType: "page" });
+export type PersonOption = Pick<Person, "id" | "username" | "display_name">;
+export type GroupOption = Pick<Group, "id" | "name">;
 export type Person = {
   id: string;
   username: string;
