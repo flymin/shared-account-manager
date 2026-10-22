@@ -12,6 +12,14 @@
 
 前端依赖由 `frontend/package-lock.json` 固定，Python 依赖由 `backend/requirements-lock.txt` 固定。更新依赖时同步锁文件，完成验证后重新构建镜像。数据库结构和数据格式使用 Alembic 版本化管理，变更时应验证已有数据的升级与回滚。
 
+## 许可证与分发
+
+项目采用 `Apache-2.0`，根目录 [LICENSE](../LICENSE) 保留 Apache 官方许可证原文，[NOTICE](../NOTICE) 记录项目署名与适用的第三方声明。源码发布包应保留这两个文件；从仓库根目录执行 `git archive` 会将它们一并收录。`frontend/package.json`、npm 锁文件中的项目许可证与应用镜像的 OCI 许可证标签均使用同一标识。
+
+`npm run build` 会在前端 `dist/` 中生成 `LICENSE`、`NOTICE` 和 `THIRD-PARTY-LICENSES.md`；后者由 Vite 按实际打包依赖收集版本、许可证和可用的许可正文。部分 npm 包没有独立许可文件，其补充署名和许可正文保存在项目 `NOTICE` 中。Web 镜像保留全部构建文件；API 镜像在 `/app/` 保留项目许可文件，并保留 Python 依赖随安装包提供的许可、版权和声明文件。基础镜像自带的许可信息也保持不变。
+
+新增或升级依赖时，应检查上游许可与额外的 NOTICE、AUTHORS 等声明，必要时同步项目 `NOTICE`，再重新构建验证。分发静态文件或镜像时须同时保留这些第三方信息，不能只分发压缩后的 JavaScript 文件。
+
 ## 服务架构
 
 ```mermaid

@@ -114,3 +114,7 @@ Web、API、后台任务和数据库分别运行。账号、权限、会话和�
 | [架构与开发](docs/development.md) | 服务架构、REST API、本地开发、后端与浏览器测试 |
 
 REST API 位于 `/api/v1`，OpenAPI 定义位于 `/api/openapi.json`。测试使用独立数据库或测试部署，运行方法见[开发指南](docs/development.md)。
+
+## License
+
+本项目采用 [Apache License 2.0](LICENSE)（`Apache-2.0`），Copyright 2026 Ruiyuan Gao。项目署名与第三方声明见 [NOTICE](NOTICE)；第三方组件保留各自的许可证。

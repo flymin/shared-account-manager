@@ -2,6 +2,8 @@
   "name": "account-manager-web",
   "private": true,
   "version": "1.0.0",
+  "license": "Apache-2.0",
+  "author": "Ruiyuan Gao",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",

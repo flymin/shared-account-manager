@@ -5,8 +5,10 @@ WORKDIR /app
 COPY backend/requirements*.txt ./
 RUN pip install --no-cache-dir -r requirements-lock.txt
 COPY backend/ ./
+COPY LICENSE NOTICE ./
 # Release archives may be extracted with a restrictive umask. Application
 # source is public code; mounted credentials remain outside /app in /run/secrets.
 RUN chmod -R a+rX /app && useradd --uid 10001 --create-home app
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 USER app
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-proxy-headers"]
