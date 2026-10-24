@@ -84,10 +84,6 @@ def main():
         "--baseline-ref", help="Git revision to compare with the working tree"
     )
     parser.add_argument(
-        "--runner",
-        help="Existing development container configured for a *_test database",
-    )
-    parser.add_argument(
         "--reset-test-data",
         action="store_true",
         required=True,
@@ -112,24 +108,21 @@ def main():
             if isinstance(node, ast.FunctionDef) and node.name == "accounts"
         )
         payload["baseline_accounts"] = ast.get_source_segment(module, function)
-    if args.runner:
-        command = ["docker", "exec", "-i", args.runner, "python", "-c", PROBE]
-    else:
-        command = [
-            str(ROOT / "ops/compose.sh"),
-            "run",
-            "--rm",
-            "--no-deps",
-            "-T",
-            "-e",
-            "DB_NAME=account_manager_test",
-            "-v",
-            f"{ROOT / 'backend'}:/app:ro",
-            "api",
-            "python",
-            "-c",
-            PROBE,
-        ]
+    command = [
+        str(ROOT / "ops/compose.sh"),
+        "run",
+        "--rm",
+        "--no-deps",
+        "-T",
+        "-e",
+        "DB_NAME=account_manager_test",
+        "-v",
+        f"{ROOT / 'backend'}:/app:ro",
+        "api",
+        "python",
+        "-c",
+        PROBE,
+    ]
     subprocess.run(command, cwd=ROOT, input=json.dumps(payload), text=True, check=True)
 
 

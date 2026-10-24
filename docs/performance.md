@@ -61,7 +61,7 @@ python3 ops/benchmark_queries.py --reset-test-data --accounts 58 --baseline-ref 
 python3 ops/benchmark_queries.py --reset-test-data --accounts 500 --baseline-ref HEAD
 ```
 
-基准工具会**清空目标测试数据库中的数据**，写入虚构账号，再在只读事务中采样。它拒绝名称不以 `_test` 结尾的数据库。默认通过 Compose 启动临时 API 进程并挂载当前后端源码；也可用 `--runner` 指定已配置到测试数据库的开发容器。不要在并行运行其他测试时重置同一数据库。
+基准工具会**清空目标测试数据库中的数据**，写入虚构账号，再在只读事务中采样。它拒绝名称不以 `_test` 结尾的数据库。工具统一通过 Compose 启动临时 API 进程，只读挂载当前工作树的后端源码（包括未提交修改），不使用已有容器内的应用副本。原 `--runner` 参数已移除，避免容器源码过期造成比较失真。不要在并行运行其他测试时重置同一数据库。
 
 `--baseline-ref` 指定要对照的版本；省略时只测当前实现。`--repeat` 默认 5，预热后报告查询次数及处理时间中位数，并在比较时核对新旧响应语义一致。测量包含处理和 JSON 序列化，不包含登录认证、TLS 或外部邮箱调用。密码散列、图片解析、OAuth 和邮箱网络耗时应分别测量。
 
