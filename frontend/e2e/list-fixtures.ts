@@ -37,7 +37,13 @@ export async function fulfillApi(
         (statuses === null || statuses.split(",").includes(accountStatus(a))),
     );
     const key = params.get("sort_by");
-    if (key === "email" || key === "quota" || key === "reset_at")
+    if (
+      key === "email" ||
+      key === "quota" ||
+      key === "reset_at" ||
+      key === "quota_updated_at" ||
+      key === "expires_at"
+    )
       items.sort((a, b) =>
         compareAccounts(a, b, {
           key,

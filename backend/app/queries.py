@@ -119,22 +119,10 @@ def account_status(cfg, active_count):
     )
 
 
-def account_page(
-    db,
-    user,
-    *,
-    scope="all",
-    q="",
-    tier=None,
-    group_id=None,
-    statuses=None,
-    sort_by=None,
-    order="asc",
-    offset=0,
-    limit=None,
+def filtered_accounts(
+    user, cfg, stamp, *, scope="all", q="", tier=None, group_id=None, statuses=None
 ):
-    stamp = now()
-    cfg = db.get(Settings, 1)
+    """Shared unpaginated selection for list reads and administrative writes."""
     query = select(Account).where(Account.deleted.is_(False))
     if scope == "hall":
         query = query.where(
@@ -171,6 +159,35 @@ def account_page(
             query = query.outerjoin(counts, counts.c.account_id == Account.id).where(
                 account_status(cfg, func.coalesce(counts.c.active_count, 0)).in_(chosen)
             )
+    return query
+
+
+def account_page(
+    db,
+    user,
+    *,
+    scope="all",
+    q="",
+    tier=None,
+    group_id=None,
+    statuses=None,
+    sort_by=None,
+    order="asc",
+    offset=0,
+    limit=None,
+):
+    stamp = now()
+    cfg = db.get(Settings, 1)
+    query = filtered_accounts(
+        user,
+        cfg,
+        stamp,
+        scope=scope,
+        q=q,
+        tier=tier,
+        group_id=group_id,
+        statuses=statuses,
+    )
     email = Account.email.collate("account_email_natural")
     if sort_by == "email":
         ordering = [email.asc() if order == "asc" else email.desc()]
@@ -186,6 +203,12 @@ def account_page(
             Account.reset_at.asc().nulls_first()
             if order == "asc"
             else Account.reset_at.desc().nulls_last(),
+            email.asc(),
+        ]
+    elif sort_by in {"quota_updated_at", "expires_at"}:
+        column = getattr(Account, sort_by)
+        ordering = [
+            (column.asc() if order == "asc" else column.desc()).nulls_last(),
             email.asc(),
         ]
     else:
@@ -231,7 +254,13 @@ def event_dtos(db, events, identities=False):
         item = dict(
             id=e.id,
             account_id=e.account_id,
-            actor=actor.display_name if actor else "系统",
+            actor=(
+                "一键重置"
+                if e.kind == "quota_updated" and e.details.get("source") == "bulk_reset"
+                else actor.display_name
+                if actor
+                else "系统"
+            ),
             kind=e.kind,
             details=e.details,
             created_at=e.created_at,

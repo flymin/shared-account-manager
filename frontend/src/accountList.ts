@@ -38,7 +38,7 @@ export function isInAccountHall(a: Account, time = Date.now()) {
 }
 
 export type AccountSort = {
-  key: "email" | "quota" | "reset_at";
+  key: "email" | "quota" | "reset_at" | "quota_updated_at" | "expires_at";
   order: "ascend" | "descend";
 };
 
@@ -48,6 +48,18 @@ export function compareAccounts(a: Account, b: Account, sort: AccountSort) {
   const byName = names.compare(a.email, b.email);
   const direction = sort.order === "ascend" ? 1 : -1;
   if (sort.key === "email") return byName * direction;
+  if (sort.key === "quota_updated_at" || sort.key === "expires_at") {
+    const left = a[sort.key],
+      right = b[sort.key];
+    if (left === null || right === null) {
+      if (left === right) return byName;
+      return left === null ? 1 : -1;
+    }
+    return (
+      (new Date(left).getTime() - new Date(right).getTime()) * direction ||
+      byName
+    );
+  }
   if (sort.key === "reset_at") {
     // For near-to-far ordering, accounts without a scheduled reset come first;
     // for far-to-near ordering, they stay at the end.

@@ -1,3 +1,4 @@
+import { BulkQuotaReset } from "./BulkQuotaReset";
 import { AccountNotes } from "./AccountNotes";
 import { DateTimeInput, dateTimeRule } from "./DateTimeInput";
 import { useEffect, useState, type ReactNode } from "react";
@@ -331,6 +332,12 @@ export function Pool({
   const pageAccounts = searching ? [] : (result?.items ?? []);
   const [detail, setDetail] = useState<Account>(),
     [action, setAction] = useState<Action>();
+  const [resetFilters, setResetFilters] = useState<{
+    q: string;
+    tier: string | null;
+    group_id: string | null;
+    statuses: string;
+  }>();
   const groupNames = new Map(groups.map((g) => [g.id, g.name]));
   const userNames = new Map(
     users.map((u) => [
@@ -599,6 +606,21 @@ export function Pool({
           )}
           <div className="filter-actions">
             {toolbar}
+            {adminMode && (
+              <Button
+                disabled={loading || !!error}
+                onClick={() =>
+                  setResetFilters({
+                    q: search,
+                    tier: tier === "all" ? null : tier,
+                    group_id: group === "all" ? null : group,
+                    statuses: [...statuses].sort().join(","),
+                  })
+                }
+              >
+                一键重置
+              </Button>
+            )}
             <Button
               icon={<ReloadOutlined aria-hidden="true" />}
               onClick={refresh}
@@ -635,6 +657,8 @@ export function Pool({
         <span className="muted">排序</span>
         <Select
           aria-label="账号排序"
+          virtual={false}
+          popupMatchSelectWidth={false}
           value={`${effectiveSort.key}:${effectiveSort.order}`}
           onChange={(value) => {
             const [key, order] = value.split(":");
@@ -648,6 +672,16 @@ export function Pool({
             { value: "quota:ascend", label: "剩余额度 ↑ 升序" },
             { value: "reset_at:ascend", label: "下次重置 ↑ 近到远" },
             { value: "reset_at:descend", label: "下次重置 ↓ 远到近" },
+            {
+              value: "quota_updated_at:descend",
+              label: "最近额度更新 ↓ 新到旧",
+            },
+            {
+              value: "quota_updated_at:ascend",
+              label: "最近额度更新 ↑ 旧到新",
+            },
+            { value: "expires_at:ascend", label: "到期日 ↑ 近到远" },
+            { value: "expires_at:descend", label: "到期日 ↓ 远到近" },
           ]}
         />
       </div>
@@ -660,7 +694,9 @@ export function Pool({
             if (
               (selected.columnKey === "email" ||
                 selected.columnKey === "quota" ||
-                selected.columnKey === "reset_at") &&
+                selected.columnKey === "reset_at" ||
+                selected.columnKey === "quota_updated_at" ||
+                selected.columnKey === "expires_at") &&
               selected.order
             ) {
               setSort({
@@ -779,7 +815,10 @@ export function Pool({
             },
             {
               title: "最近额度更新",
-              key: "updated",
+              key: "quota_updated_at",
+              sorter: true,
+              sortDirections: ["descend", "ascend", "descend"],
+              sortOrder: sort?.key === "quota_updated_at" ? sort.order : null,
               width: 165,
               render: (_, a) => (
                 <>
@@ -790,7 +829,9 @@ export function Pool({
                         {a.recent_updates[0].details.quota}%
                       </div>
                       <small className="muted">
-                        {fmt(a.recent_updates[0].created_at)}
+                        {fmt(
+                          a.quota_updated_at || a.recent_updates[0].created_at,
+                        )}
                       </small>
                     </>
                   ) : (
@@ -802,6 +843,9 @@ export function Pool({
             {
               title: "到期日",
               key: "expires_at",
+              sorter: true,
+              sortDirections: ["ascend", "descend", "ascend"],
+              sortOrder: sort?.key === "expires_at" ? sort.order : null,
               width: 145,
               render: (_, a) => <Expiry value={a.expires_at} />,
             },
@@ -873,6 +917,14 @@ export function Pool({
         ))}
         {!loading && !total && <Empty description="暂无符合条件的账号" />}
       </div>
+      {resetFilters && (
+        <BulkQuotaReset
+          filters={resetFilters}
+          groups={groups}
+          onClose={() => setResetFilters(undefined)}
+          refresh={refresh}
+        />
+      )}
       <Pagination
         className="account-pagination"
         current={page}

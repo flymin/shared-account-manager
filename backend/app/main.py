@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, delete, func, text, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import load_only
-from . import auth, config, queries, domain as d, schemas as s
+from . import auth, config, queries, quota_resets, domain as d, schemas as s
 from .db import get_db
 from .models import (
     User,
@@ -173,7 +173,8 @@ def accounts(
     tier: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
     group_id: str | None = None,
     statuses: Annotated[str | None, Query(max_length=150)] = None,
-    sort_by: Literal["email", "quota", "reset_at"] | None = None,
+    sort_by: Literal["email", "quota", "reset_at", "quota_updated_at", "expires_at"]
+    | None = None,
     order: Literal["asc", "desc"] = "asc",
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
@@ -469,6 +470,24 @@ def delete_account(
         a.deleted = True
         d.event(db, "account_deleted", user, a, {"reason": data.reason.strip()})
     return {"ok": True}
+
+
+@app.post("/api/v1/account-quota-resets/preview")
+def preview_quota_reset(
+    data: s.QuotaResetPreviewInput,
+    user=Depends(auth.admin),
+    db=Depends(get_db, scope="function"),
+):
+    return quota_resets.preview(db, user, data)
+
+
+@app.post("/api/v1/account-quota-resets", status_code=201)
+def bulk_quota_reset(
+    data: s.QuotaResetInput,
+    user=Depends(auth.admin),
+    db=Depends(get_db, scope="function"),
+):
+    return quota_resets.execute(db, user, data)
 
 
 @app.post("/api/v1/accounts/{account_id}/quota-reports", status_code=201)

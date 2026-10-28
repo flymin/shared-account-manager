@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Annotated, Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from .password_policy import MIN_LENGTH, MAX_LENGTH
 from .plugins import default_mail_tool
@@ -108,7 +108,7 @@ class SettingsInput(Input):
 
 
 class TimeInput(Input):
-    @field_validator("expires_at", "reset_at", check_fields=False)
+    @field_validator("expires_at", "reset_at", "occurred_at", check_fields=False)
     @classmethod
     def aware(cls, v):
         if v is not None and v.tzinfo is None:
@@ -194,3 +194,19 @@ class MailOAuthInput(Input):
 
 class ManualMailOAuthInput(Input):
     callback_url: str = Field(min_length=1, max_length=8192)
+
+
+class AccountFilters(Input):
+    q: str = Field(default="", max_length=254)
+    tier: str | None = Field(default=None, min_length=1, max_length=64)
+    group_id: str | None = Field(default=None, max_length=36)
+    statuses: str | None = Field(default=None, max_length=150)
+
+
+class QuotaResetPreviewInput(TimeInput):
+    occurred_at: datetime
+    filters: AccountFilters
+
+
+class QuotaResetInput(QuotaResetPreviewInput):
+    request_id: UUID

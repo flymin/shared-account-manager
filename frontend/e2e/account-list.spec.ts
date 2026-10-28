@@ -223,7 +223,7 @@ test("迟到的旧筛选响应不能覆盖当前查询", async ({ page }) => {
 
 async function sort(
   page: Page,
-  field: "email" | "quota" | "reset_at",
+  field: "email" | "quota" | "reset_at" | "quota_updated_at" | "expires_at",
   direction: "ascend" | "descend",
 ) {
   if (await page.locator(".mobile-nav").isVisible()) {
@@ -233,15 +233,23 @@ async function sort(
         ? "账号名"
         : field === "quota"
           ? "剩余额度"
-          : "下次重置";
+          : field === "expires_at"
+            ? "到期日"
+            : field === "quota_updated_at"
+              ? "最近额度更新"
+              : "下次重置";
     const suffix =
-      field === "reset_at"
+      field === "quota_updated_at"
         ? direction === "ascend"
-          ? "↑ 近到远"
-          : "↓ 远到近"
-        : direction === "ascend"
-          ? "↑ 升序"
-          : "↓ 降序";
+          ? "↑ 旧到新"
+          : "↓ 新到旧"
+        : field === "reset_at" || field === "expires_at"
+          ? direction === "ascend"
+            ? "↑ 近到远"
+            : "↓ 远到近"
+          : direction === "ascend"
+            ? "↑ 升序"
+            : "↓ 降序";
     const label = `${title} ${suffix}`;
     await page
       .locator(".ant-select-dropdown:visible")
@@ -254,7 +262,11 @@ async function sort(
           ? /^账号$/
           : field === "quota"
             ? /^剩余额度$/
-            : /^下次重置$/,
+            : field === "expires_at"
+              ? /^到期日$/
+              : field === "quota_updated_at"
+                ? /^最近额度更新$/
+                : /^下次重置$/,
     });
     const expected = direction === "ascend" ? "ascending" : "descending";
     for (
@@ -294,6 +306,10 @@ for (const adminMode of [false, true]) {
         "剩余额度 ↑ 升序",
         "下次重置 ↑ 近到远",
         "下次重置 ↓ 远到近",
+        "最近额度更新 ↓ 新到旧",
+        "最近额度更新 ↑ 旧到新",
+        "到期日 ↑ 近到远",
+        "到期日 ↓ 远到近",
       ]);
       await page
         .locator(".ant-select-dropdown:visible")
@@ -521,9 +537,13 @@ test("五种状态默认全选，单选、多选和取消某类互不重复", as
   await expect(page.locator(".list-caption strong")).toHaveText("6");
   await panel.getByRole("button", { name: "清空", exact: true }).click();
   await expect(page.locator(".list-caption strong")).toHaveText("0");
-  await panel.getByRole("checkbox", { name: "异常", exact: true }).check();
+  const abnormal = panel.getByRole("checkbox", { name: "异常", exact: true });
+  await abnormal.click();
+  await expect(abnormal).toBeChecked();
   await expect.poll(() => rows(page)).toEqual(["bravo@example.test"]);
-  await panel.getByRole("checkbox", { name: "人数已满", exact: true }).check();
+  const full = panel.getByRole("checkbox", { name: "人数已满", exact: true });
+  await full.click();
+  await expect(full).toBeChecked();
   await expect
     .poll(() => rows(page))
     .toEqual(["echo@example.test", "bravo@example.test"]);
@@ -716,3 +736,40 @@ test("耗尽状态使用系统判定，等于阈值及未知额度不会误判",
       "threshold-0@example.test",
     ]);
 });
+
+for (const field of ["quota_updated_at", "expires_at"] as const) {
+  test(`${field} 在服务端按时间双向排序，空值置后`, async ({ page }) => {
+    const fixtures = [
+      {
+        ...common,
+        id: "later",
+        email: "later@example.test",
+        [field]: "2035-02-01T00:00:00Z",
+      },
+      { ...common, id: "none", email: "none@example.test", [field]: null },
+      {
+        ...common,
+        id: "earlier",
+        email: "earlier@example.test",
+        [field]: "2035-01-01T00:00:00Z",
+      },
+    ];
+    await openFixture(page, false, fixtures as typeof accounts, 5, true);
+    await sort(page, field, "ascend");
+    await expect
+      .poll(() => rows(page))
+      .toEqual([
+        "earlier@example.test",
+        "later@example.test",
+        "none@example.test",
+      ]);
+    await sort(page, field, "descend");
+    await expect
+      .poll(() => rows(page))
+      .toEqual([
+        "later@example.test",
+        "earlier@example.test",
+        "none@example.test",
+      ]);
+  });
+}

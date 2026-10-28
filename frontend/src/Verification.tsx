@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Form, Input, Modal, Space, Tag } from "antd";
-import { api, ApiError, getSessionVersion } from "./api";
+import { api, ApiError, getSessionVersion, newRequestId } from "./api";
 import { CopyButton } from "./ui";
 
 type Kind = "service";
@@ -269,12 +269,7 @@ export function Verification({
 
   async function start() {
     const token = ++generation.current;
-    // randomUUID is unavailable on some plain-HTTP mobile deployments.
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    bytes[6] = (bytes[6] & 15) | 64;
-    bytes[8] = (bytes[8] & 63) | 128;
-    const hex = [...bytes].map((v) => v.toString(16).padStart(2, "0")).join("");
-    const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    const id = newRequestId();
     runId.current = id;
     currentRun.current = null;
     setRun(null);

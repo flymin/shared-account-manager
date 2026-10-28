@@ -396,6 +396,7 @@ export function Credentials({
 }
 const eventNames: Record<string, string> = {
   quota_updated: "额度更新",
+  quota_bulk_reset: "一键重置额度",
   quota_reset: "额度自动重置",
   health_reported: "异常反馈",
   health_cleared: "确认恢复",
@@ -445,6 +446,11 @@ export function eventText(e: Audit) {
   const parts: string[] = [];
   if (e.kind === "accounts_exported") parts.push(`导出 ${d.count} 个账号`);
   if (e.kind === "account_note_added") parts.push(`备注 #${d.note_id}`);
+  if (e.kind === "quota_bulk_reset")
+    parts.push(
+      `匹配 ${d.matched_count} 个 · 重置 ${d.reset_count} 个 · 保留 ${d.skipped_count} 个`,
+    );
+  if (d.occurred_at) parts.push(`实际重置 ${fmt(d.occurred_at)}`);
   if (d.quota !== undefined) parts.push(`剩余 ${d.quota}%`);
   if (d.reset_at) parts.push(`重置 ${fmt(d.reset_at)}`);
   if (d.next_reset_at) parts.push(`下次重置 ${fmt(d.next_reset_at)}`);
