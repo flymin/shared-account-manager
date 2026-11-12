@@ -69,17 +69,22 @@ export function AdminAccounts({
   const exportRequest = useRef<AbortController | null>(null);
   const { message } = App.useApp();
   useEffect(() => () => exportRequest.current?.abort(), []);
-  async function downloadAccountExport() {
+  async function downloadAccountExport(filters: URLSearchParams) {
     if (exportRequest.current) return;
     const controller = new AbortController();
     exportRequest.current = controller;
     const session = getSessionVersion();
     setExporting(true);
     try {
-      const csv = await api<Blob>("/accounts/export.csv", "GET", undefined, {
-        signal: controller.signal,
-        responseType: "blob",
-      });
+      const csv = await api<Blob>(
+        `/accounts/export.csv?${filters}`,
+        "GET",
+        undefined,
+        {
+          signal: controller.signal,
+          responseType: "blob",
+        },
+      );
       if (controller.signal.aborted || session !== getSessionVersion()) return;
       const url = URL.createObjectURL(csv);
       const link = document.createElement("a");
@@ -109,14 +114,15 @@ export function AdminAccounts({
         adminMode
         groups={groups}
         users={users}
-        toolbar={
+        toolbar={({ filters, disabled }) => (
           <Space size={8}>
             <Button
               icon={<DownloadOutlined aria-hidden="true" />}
               aria-label="导出账号 CSV"
-              title="导出全部未删除账号，包含登录密码和邮箱密码"
+              title="导出当前筛选范围的全部账号，包含登录密码、邮箱密码和已配置的 2FA 密钥"
               loading={exporting}
-              onClick={downloadAccountExport}
+              disabled={disabled}
+              onClick={() => downloadAccountExport(filters)}
             >
               导出账号
             </Button>
@@ -131,7 +137,7 @@ export function AdminAccounts({
               </span>
             </Button>
           </Space>
-        }
+        )}
       />
       {importOpen && (
         <ImportDialog

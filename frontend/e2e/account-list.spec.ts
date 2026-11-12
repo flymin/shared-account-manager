@@ -25,8 +25,8 @@ const common = {
   active_count: 0,
   current_users: [],
   recent_updates: [] as Audit[],
-  group_ids: [],
-  user_ids: [],
+  group_ids: [] as string[],
+  user_ids: [] as string[],
 };
 const accounts = [
   {
@@ -82,6 +82,7 @@ async function openFixture(
   fixtures = accounts,
   threshold = 5,
   adminMode = false,
+  groups: { id: string; name: string }[] = [],
 ) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/v1", "");
@@ -119,11 +120,13 @@ async function openFixture(
                   : a),
                 quota_depleted: a.quota !== null && a.quota < threshold,
               }))
-            : [];
+            : path === "/groups"
+              ? groups
+              : [];
     if (path === "/accounts/export.csv")
       return fulfillApi(route, {
         contentType: "text/csv",
-        body: "\ufeff账号邮箱,登录密码,邮箱密码,账号类别,是否停用,是否设置 2FA\nalpha@example.test,test-pass,test-mail,5x,否,是\n",
+        body: "\ufeff账号邮箱,登录密码,邮箱密码,账号类别,是否停用,是否设置 2FA,到期时间（北京时间）,2FA 密钥,2FA 配置链接\nalpha@example.test,test-pass,test-mail,5x,否,否,,,\n",
       });
     await fulfillApi(route, {
       contentType: "application/json",
@@ -597,7 +600,9 @@ test("管理员状态筛选包含已停用，且停用标签不改变行高", as
   }
 
   await panel.getByRole("button", { name: "清空", exact: true }).click();
-  await panel.getByRole("checkbox", { name: "已停用", exact: true }).check();
+  const disabled = panel.getByRole("checkbox", { name: "已停用", exact: true });
+  await disabled.click();
+  await expect(disabled).toBeChecked();
   await expect.poll(() => rows(page)).toEqual(["stopped@example.test"]);
 });
 
@@ -773,3 +778,118 @@ for (const field of ["quota_updated_at", "expires_at"] as const) {
       ]);
   });
 }
+
+test("导出沿用搜索和三个筛选框，跨分页且保留空状态筛选", async ({ page }) => {
+  const requests: URL[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/accounts/export.csv") requests.push(url);
+  });
+  const fixtures = [
+    ...Array.from({ length: 25 }, (_, i) => ({
+      ...common,
+      id: `selected-${i}`,
+      email: `selected${i}@example.test`,
+      tier: "20x",
+      group_ids: ["export-group"],
+    })),
+    {
+      ...common,
+      id: "outside-group",
+      email: "selected-other@example.test",
+      tier: "20x",
+      group_ids: ["other-group"],
+    },
+    {
+      ...common,
+      id: "outside-tier",
+      email: "selected-type@example.test",
+      group_ids: ["export-group"],
+    },
+    {
+      ...common,
+      id: "outside-state",
+      email: "selected-disabled@example.test",
+      tier: "20x",
+      disabled: true,
+      group_ids: ["export-group"],
+    },
+    {
+      ...common,
+      id: "outside-search",
+      email: "other@example.test",
+      tier: "20x",
+      group_ids: ["export-group"],
+    },
+  ];
+  await openFixture(page, false, fixtures, 5, true, [
+    { id: "export-group", name: "导出测试组" },
+    { id: "other-group", name: "其他测试组" },
+  ]);
+  await page.getByRole("textbox", { name: "搜索账号邮箱" }).fill("selected");
+  await page
+    .locator(".account-filters .ant-select")
+    .filter({ has: page.getByRole("combobox", { name: "筛选类型" }) })
+    .locator(".ant-select-selector")
+    .click();
+  await page
+    .locator(".ant-select-dropdown:visible")
+    .getByText("20x", { exact: true })
+    .click();
+  await page.locator(".account-group-filter .ant-select-selector").click();
+  await page
+    .locator(".ant-select-dropdown:visible")
+    .getByText("导出测试组", { exact: true })
+    .click();
+  await page.getByRole("button", { name: "筛选状态", exact: true }).click();
+  const panel = page.locator(".status-filter-panel");
+  await panel.getByRole("button", { name: "清空", exact: true }).click();
+  const normal = panel.getByRole("checkbox", { name: "正常", exact: true });
+  await normal.click();
+  await expect(normal).toBeChecked();
+  await page.getByRole("button", { name: "筛选状态", exact: true }).click();
+  await expect(page.locator(".list-caption strong")).toHaveText("25");
+  await page
+    .locator(".account-pagination")
+    .getByTitle("2", { exact: true })
+    .click();
+  const exportButton = page.getByRole("button", {
+    name: "导出账号 CSV",
+    exact: true,
+  });
+  const downloaded = page.waitForEvent("download");
+  await exportButton.click();
+  expect((await downloaded).suggestedFilename()).toBe("account-export.csv");
+  expect(requests).toHaveLength(1);
+  expect(Object.fromEntries(requests[0].searchParams)).toEqual({
+    q: "selected",
+    tier: "20x",
+    group_id: "export-group",
+    statuses: "normal",
+  });
+  await page.getByRole("button", { name: "筛选状态", exact: true }).click();
+  await panel.getByRole("button", { name: "清空", exact: true }).click();
+  await page.getByRole("button", { name: "筛选状态", exact: true }).click();
+  await expect(page.locator(".list-caption strong")).toHaveText("0");
+  const emptyDownload = page.waitForEvent("download");
+  await exportButton.click();
+  await emptyDownload;
+  expect(requests[1].searchParams.get("statuses")).toBe("");
+  expect(requests[1].searchParams.has("limit")).toBe(false);
+  expect(requests[1].searchParams.has("offset")).toBe(false);
+});
+
+test("邮箱搜索尚未应用时禁用导出，避免使用旧筛选范围", async ({ page }) => {
+  await openFixture(page, false, accounts, 5, true);
+  const button = page.getByRole("button", {
+    name: "导出账号 CSV",
+    exact: true,
+  });
+  await expect(button).toBeEnabled();
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
+  await page.getByRole("textbox", { name: "搜索账号邮箱" }).fill("alpha");
+  await expect(button).toBeDisabled();
+  await page.clock.runFor(350);
+  await expect(button).toBeEnabled();
+});

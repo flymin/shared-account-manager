@@ -283,7 +283,9 @@ export function Pool({
   adminMode?: boolean;
   groups?: GroupOption[];
   users?: PersonOption[];
-  toolbar?: ReactNode;
+  toolbar?:
+    | ReactNode
+    | ((context: { filters: URLSearchParams; disabled: boolean }) => ReactNode);
 }) {
   const tierFilters = useTierFilters();
   const { message, modal } = App.useApp();
@@ -311,17 +313,18 @@ export function Pool({
     }, 300);
     return () => clearTimeout(timer);
   }, [q, search]);
-  const params = new URLSearchParams({
-    scope: adminMode ? "all" : "hall",
+  const filters = new URLSearchParams({
     q: search,
     statuses: [...statuses].sort().join(","),
-    sort_by: effectiveSort.key,
-    order: effectiveSort.order === "ascend" ? "asc" : "desc",
-    offset: String((currentPage - 1) * pageSize),
-    limit: String(pageSize),
   });
-  if (tier !== "all") params.set("tier", tier);
-  if (group !== "all") params.set("group_id", group);
+  if (tier !== "all") filters.set("tier", tier);
+  if (group !== "all") filters.set("group_id", group);
+  const params = new URLSearchParams(filters);
+  params.set("scope", adminMode ? "all" : "hall");
+  params.set("sort_by", effectiveSort.key);
+  params.set("order", effectiveSort.order === "ascend" ? "asc" : "desc");
+  params.set("offset", String((currentPage - 1) * pageSize));
+  params.set("limit", String(pageSize));
   const { data: result, error } = usePageResource<Account>(
     `/accounts?${params}`,
     epoch,
@@ -605,7 +608,9 @@ export function Pool({
             />
           )}
           <div className="filter-actions">
-            {toolbar}
+            {typeof toolbar === "function"
+              ? toolbar({ filters, disabled: loading || !!error })
+              : toolbar}
             {adminMode && (
               <Button
                 disabled={loading || !!error}

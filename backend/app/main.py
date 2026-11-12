@@ -3,13 +3,14 @@ import io
 from typing import Annotated, Literal
 from datetime import timedelta, timezone
 
+from cryptography.fernet import InvalidToken
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, delete, func, text, or_
+from sqlalchemy import select, delete, func, text, or_, and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import load_only
-from . import auth, config, queries, quota_resets, domain as d, schemas as s
+from . import auth, config, queries, quota_resets, totp, domain as d, schemas as s
 from .db import get_db
 from .models import (
     User,
@@ -201,23 +202,24 @@ def accounts(
 def export_accounts(
     user=Depends(auth.authenticate),
     db=Depends(get_db, scope="function"),
+    q: Annotated[str, Query(max_length=254)] = "",
+    tier: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    group_id: str | None = None,
+    statuses: Annotated[str | None, Query(max_length=150)] = None,
 ):
     auth.admin(user)
     cfg = d.settings(db)
-    configured_2fa = set(
-        db.scalars(
-            select(TwoFactor.account_id).where(
-                TwoFactor.kind == "service", TwoFactor.uri_encrypted != ""
-            )
+    accounts = db.execute(
+        queries.filtered_accounts(
+            user, cfg, now(), q=q, tier=tier, group_id=group_id, statuses=statuses
         )
-    )
-    accounts = list(
-        db.scalars(
-            select(Account)
-            .where(Account.deleted.is_(False))
-            .order_by(Account.created_at, Account.email)
+        .add_columns(TwoFactor.uri_encrypted)
+        .outerjoin(
+            TwoFactor,
+            and_(TwoFactor.account_id == Account.id, TwoFactor.kind == "service"),
         )
-    )
+        .order_by(Account.created_at, Account.email, Account.id)
+    ).all()
     stream = io.StringIO(newline="")
     writer = csv.writer(stream)
     writer.writerow(
@@ -229,9 +231,26 @@ def export_accounts(
             "是否停用",
             "是否设置 2FA",
             "到期时间（北京时间）",
+            "2FA 密钥",
+            "2FA 配置链接",
         ]
     )
-    for account in accounts:
+    for account, encrypted_uri in accounts:
+        try:
+            password = cipher().decrypt(account.password_encrypted.encode()).decode()
+            mail_password = (
+                cipher().decrypt(account.auth_password_encrypted.encode()).decode()
+            )
+            uri = (
+                cipher().decrypt(encrypted_uri.encode()).decode()
+                if encrypted_uri
+                else ""
+            )
+            secret = totp.parse_uri(uri).secret if uri else ""
+        except (InvalidToken, UnicodeError, totp.InvalidQR):
+            raise HTTPException(
+                409, "账号凭据或 2FA 配置无法读取，请修复后重新导出"
+            ) from None
         expires_at = (
             account.expires_at.astimezone(timezone(timedelta(hours=8))).strftime(
                 "%Y-%m-%d %H:%M:%S"
@@ -242,12 +261,14 @@ def export_accounts(
         writer.writerow(
             [
                 account.email,
-                cipher().decrypt(account.password_encrypted.encode()).decode(),
-                cipher().decrypt(account.auth_password_encrypted.encode()).decode(),
+                password,
+                mail_password,
                 d.option_name(cfg, "tiers", account.tier),
                 "是" if account.disabled else "否",
-                "是" if account.id in configured_2fa else "否",
+                "是" if uri else "否",
                 expires_at,
+                secret,
+                uri,
             ]
         )
     d.event(db, "accounts_exported", user, details={"count": len(accounts)})
