@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import any_, case, cast, func, literal_column, or_, select, true
+from sqlalchemy import any_, case, cast, false, func, literal_column, or_, select, true
 from sqlalchemy.dialects.postgresql import ARRAY, array
 from sqlalchemy.orm import aliased, load_only
 
@@ -59,7 +59,15 @@ USER_FIELDS = (
     "deleted",
     "created_at",
 )
-STATUSES = {"disabled", "abnormal", "possibly_recovered", "empty", "full", "normal"}
+BASE_STATUSES = {
+    "disabled",
+    "abnormal",
+    "possibly_recovered",
+    "empty",
+    "full",
+    "normal",
+}
+STATUSES = BASE_STATUSES | {"expired"}
 
 
 def account_columns(query):
@@ -147,18 +155,25 @@ def filtered_accounts(
         chosen = set(statuses.split(",")) if statuses else set()
         if not chosen <= STATUSES:
             raise HTTPException(422, "账号状态无效")
-        unrestricted = chosen == STATUSES or (
-            scope == "hall" and chosen | {"disabled"} == STATUSES
-        )
-        counts = (
-            occupancy(query.with_only_columns(Account.id).correlate(None))
-            if not unrestricted
-            else None
+        # Expiration is an additional, overlapping condition. Preserve the
+        # existing state classification (including disabled) for older clients.
+        unrestricted = BASE_STATUSES <= chosen or (
+            scope == "hall" and BASE_STATUSES - {"disabled"} <= chosen
         )
         if not unrestricted:
-            query = query.outerjoin(counts, counts.c.account_id == Account.id).where(
-                account_status(cfg, func.coalesce(counts.c.active_count, 0)).in_(chosen)
-            )
+            conditions = []
+            base = chosen & BASE_STATUSES
+            if base:
+                counts = occupancy(query.with_only_columns(Account.id).correlate(None))
+                query = query.outerjoin(counts, counts.c.account_id == Account.id)
+                conditions.append(
+                    account_status(cfg, func.coalesce(counts.c.active_count, 0)).in_(
+                        base
+                    )
+                )
+            if "expired" in chosen:
+                conditions.append(Account.expires_at <= stamp)
+            query = query.where(or_(false(), *conditions))
     return query
 
 

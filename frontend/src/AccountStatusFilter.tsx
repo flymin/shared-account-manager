@@ -4,7 +4,8 @@ import { DownOutlined } from "@ant-design/icons";
 import {
   ACCOUNT_STATUSES,
   ALL_ACCOUNT_STATUSES,
-  DISABLED_ACCOUNT_STATUS,
+  ALL_ADMIN_ACCOUNT_STATUSES,
+  ADMIN_ACCOUNT_STATUSES,
   type AccountStatus,
 } from "./accountList";
 
@@ -18,11 +19,9 @@ export function AccountStatusFilter({
   includeDisabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const options = includeDisabled
-    ? [...ACCOUNT_STATUSES, DISABLED_ACCOUNT_STATUS]
-    : ACCOUNT_STATUSES;
+  const options = includeDisabled ? ADMIN_ACCOUNT_STATUSES : ACCOUNT_STATUSES;
   const allStatuses = includeDisabled
-    ? [...ALL_ACCOUNT_STATUSES, DISABLED_ACCOUNT_STATUS.value]
+    ? ALL_ADMIN_ACCOUNT_STATUSES
     : ALL_ACCOUNT_STATUSES;
   const all =
     value.length === allStatuses.length &&
@@ -62,7 +61,9 @@ export function AccountStatusFilter({
             options={options.map((s) => ({ ...s }))}
           />
           <p className="small muted">
-            多选展示所选类别；停用账号单独归入“已停用”，其他账号按异常、可能恢复、额度已耗尽、人数已满、正常归类。
+            {includeDisabled
+              ? "多选显示任一条件匹配的账号，结果不重复。“已过期”按到期时间判断，包含同时停用的账号；其他状态保持原有分类。"
+              : "多选展示所选类别；账号按异常、可能恢复、额度已耗尽、人数已满、正常归类。"}
           </p>
         </div>
       }

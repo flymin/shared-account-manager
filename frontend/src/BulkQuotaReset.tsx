@@ -4,7 +4,7 @@ import { api, newRequestId, type GroupOption } from "./api";
 import { DateTimeInput, dateTimeRule } from "./DateTimeInput";
 import { fmt, iso, localDate } from "./ui";
 import { useTierFilters } from "./AccountOptions";
-import { ACCOUNT_STATUSES, DISABLED_ACCOUNT_STATUS } from "./accountList";
+import { ADMIN_ACCOUNT_STATUSES } from "./accountList";
 
 type Filters = {
   q: string;
@@ -42,8 +42,9 @@ export function BulkQuotaReset({
   }>();
   const generation = useRef(0);
   const inFlight = useRef(false);
-  const statuses = [...ACCOUNT_STATUSES, DISABLED_ACCOUNT_STATUS]
-    .filter((s) => filters.statuses.split(",").includes(s.value))
+  const statuses = ADMIN_ACCOUNT_STATUSES.filter((s) =>
+    filters.statuses.split(",").includes(s.value),
+  )
     .map((s) => s.label)
     .join("、");
   async function inspect() {

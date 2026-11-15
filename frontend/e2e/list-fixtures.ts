@@ -1,7 +1,7 @@
 import type { Route } from "@playwright/test";
 import type { Account } from "../src/api";
 import {
-  accountStatus,
+  matchesAccountStatuses,
   compareAccounts,
   isInAccountHall,
 } from "../src/accountList";
@@ -34,7 +34,7 @@ export async function fulfillApi(
         (!params.has("tier") || a.tier === params.get("tier")) &&
         (!params.has("group_id") ||
           a.group_ids?.includes(params.get("group_id")!)) &&
-        (statuses === null || statuses.split(",").includes(accountStatus(a))),
+        matchesAccountStatuses(a, statuses),
     );
     const key = params.get("sort_by");
     if (

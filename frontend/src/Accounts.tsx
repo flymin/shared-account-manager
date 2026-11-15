@@ -1,3 +1,8 @@
+import { BulkAccountEdit } from "./BulkAccountEdit";
+import {
+  useAccountSelection,
+  type AccountFilters,
+} from "./useAccountSelection";
 import { BulkQuotaReset } from "./BulkQuotaReset";
 import { AccountNotes } from "./AccountNotes";
 import { DateTimeInput, dateTimeRule } from "./DateTimeInput";
@@ -7,6 +12,8 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
+  Tooltip,
   ConfigProvider,
   Drawer,
   Empty,
@@ -21,6 +28,9 @@ import {
   Tag,
 } from "antd";
 import {
+  CloseOutlined,
+  CheckSquareOutlined,
+  EditOutlined,
   ArrowRightOutlined,
   SearchOutlined,
   ReloadOutlined,
@@ -333,6 +343,19 @@ export function Pool({
   const searching = q !== search;
   const loading = searching || !result;
   const pageAccounts = searching ? [] : (result?.items ?? []);
+  const selectionFilters: AccountFilters = {
+    q: search,
+    statuses: [...statuses].sort().join(","),
+    tier: tier === "all" ? null : tier,
+    group_id: group === "all" ? null : group,
+  };
+  const selection = useAccountSelection(selectionFilters, epoch);
+  const selectedIds = new Set(selection.ids);
+  const [bulkEdit, setBulkEdit] = useState<{
+    ids: string[];
+    filters: AccountFilters;
+  }>();
+
   const [detail, setDetail] = useState<Account>(),
     [action, setAction] = useState<Action>();
   const [resetFilters, setResetFilters] = useState<{
@@ -607,7 +630,66 @@ export function Pool({
               ]}
             />
           )}
-          <div className="filter-actions">
+          <div
+            className={`filter-actions${selection.active ? " has-selection" : ""}`}
+          >
+            {adminMode && (
+              <div className="account-selection-actions">
+                <Button
+                  icon={
+                    selection.active ? (
+                      <CloseOutlined aria-hidden="true" />
+                    ) : (
+                      <CheckSquareOutlined aria-hidden="true" />
+                    )
+                  }
+                  disabled={!selection.active && (loading || !!error)}
+                  onClick={selection.active ? selection.exit : selection.enter}
+                >
+                  {selection.active ? "取消多选" : "多选"}
+                </Button>
+                {selection.active && (
+                  <>
+                    <Button
+                      icon={<EditOutlined aria-hidden="true" />}
+                      disabled={
+                        !selection.ids.length ||
+                        selection.busy ||
+                        loading ||
+                        !!error ||
+                        !!selection.error
+                      }
+                      onClick={() =>
+                        setBulkEdit({
+                          ids: [...selection.ids],
+                          filters: { ...selectionFilters },
+                        })
+                      }
+                    >
+                      批量编辑
+                    </Button>
+                    <Button
+                      disabled={
+                        selection.busy ||
+                        loading ||
+                        !!error ||
+                        !total ||
+                        selection.ids.length === total
+                      }
+                      onClick={selection.all}
+                    >
+                      全部选择
+                    </Button>
+                    <Button
+                      disabled={selection.busy || !selection.ids.length}
+                      onClick={selection.clear}
+                    >
+                      全部取消
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
             {typeof toolbar === "function"
               ? toolbar({ filters, disabled: loading || !!error })
               : toolbar}
@@ -634,8 +716,29 @@ export function Pool({
           </div>
         </div>
       </ConfigProvider>
+      {selection.active && selection.error && (
+        <Alert
+          type="error"
+          showIcon
+          message={selection.error}
+          action={
+            <Button size="small" onClick={selection.retry}>
+              重新核对
+            </Button>
+          }
+        />
+      )}
       <div className="list-caption">
         <div className="list-count-controls">
+          {selection.active && (
+            <span className="selection-caption">
+              {" "}
+              <span className="selection-count" aria-live="polite">
+                已选 <b>{selection.ids.length}</b>
+              </span>
+            </span>
+          )}
+
           <span>
             {adminMode ? "账号资产" : "可见账号"} <strong>{total}</strong>
           </span>
@@ -693,6 +796,26 @@ export function Pool({
       <div className="desktop-table">
         <Table
           rowKey="id"
+          rowSelection={
+            adminMode && selection.active
+              ? {
+                  columnWidth: 40,
+                  selectedRowKeys: selection.ids,
+                  preserveSelectedRowKeys: true,
+                  onSelect: (record, checked) =>
+                    selection.toggle(record.id, checked),
+                  onSelectAll: (checked) =>
+                    selection.page(pageAccounts, checked),
+                  getCheckboxProps: (record) => ({
+                    disabled: selection.busy || loading,
+                    "aria-label": `选择账号 ${record.email}`,
+                  }),
+                  columnTitle: (original) => (
+                    <Tooltip title="选择本页">{original}</Tooltip>
+                  ),
+                }
+              : undefined
+          }
           dataSource={pageAccounts}
           onChange={(_, __, sorter) => {
             const selected = Array.isArray(sorter) ? sorter[0] : sorter;
@@ -869,6 +992,16 @@ export function Pool({
         {pageAccounts.map((a) => (
           <Card key={a.id} className="account-card">
             <div className="card-top">
+              {adminMode && selection.active && (
+                <Checkbox
+                  aria-label={`选择账号 ${a.email}`}
+                  disabled={selection.busy || loading}
+                  checked={selectedIds.has(a.id)}
+                  onChange={(event) =>
+                    selection.toggle(a.id, event.target.checked)
+                  }
+                />
+              )}
               <strong>{a.email}</strong>
               <Tag className="tier-tag">{a.tier_name || a.tier}</Tag>
             </div>
@@ -922,6 +1055,20 @@ export function Pool({
         ))}
         {!loading && !total && <Empty description="暂无符合条件的账号" />}
       </div>
+      {bulkEdit && (
+        <BulkAccountEdit
+          accountIds={bulkEdit.ids}
+          filters={bulkEdit.filters}
+          groups={groups}
+          users={users}
+          onClose={() => setBulkEdit(undefined)}
+          onSaved={() => {
+            setBulkEdit(undefined);
+            selection.exit();
+            refresh();
+          }}
+        />
+      )}
       {resetFilters && (
         <BulkQuotaReset
           filters={resetFilters}

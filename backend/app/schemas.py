@@ -210,3 +210,56 @@ class QuotaResetPreviewInput(TimeInput):
 
 class QuotaResetInput(QuotaResetPreviewInput):
     request_id: UUID
+
+
+class AccountSelectionInput(Input):
+    filters: AccountFilters
+    account_ids: list[str] | None = Field(default=None, max_length=10000)
+
+
+class BulkHealthInput(Input):
+    action: Literal["report", "clear"]
+    categories: list[OptionId] = Field(default_factory=list, max_length=50)
+    note: str = Field(default="", max_length=2000)
+
+
+class BulkAccountChanges(TimeInput):
+    tier: OptionId | None = None
+    capacity: int | None = Field(default=None, ge=1, le=1000, strict=True)
+    quota_reset_interval_days: int | None = Field(
+        default=None, ge=1, le=365, strict=True
+    )
+    expires_at: datetime | None = None
+    mail_tool: str | None = Field(default=None, min_length=1, max_length=64)
+    enabled: bool | None = Field(default=None, strict=True)
+    group_ids: list[str] | None = Field(default=None, max_length=100)
+    user_ids: list[str] | None = Field(default=None, max_length=1000)
+    quota: int | None = Field(default=None, ge=0, le=100, strict=True)
+    reset_at: datetime | None = None
+    health: BulkHealthInput | None = None
+    note: (
+        Annotated[
+            str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+        ]
+        | None
+    ) = None
+
+    @field_validator(
+        "tier", "enabled", "quota", "group_ids", "user_ids", "health", "note"
+    )
+    @classmethod
+    def supplied_not_null(cls, value):
+        if value is None:
+            raise ValueError("修改项不能为空；不修改时请省略此项")
+        return value
+
+
+class BulkAccountPreviewInput(Input):
+    account_ids: list[str] = Field(min_length=1, max_length=10000)
+    filters: AccountFilters
+    changes: BulkAccountChanges
+
+
+class BulkAccountEditInput(BulkAccountPreviewInput):
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    request_id: UUID

@@ -568,7 +568,7 @@ test("管理员状态筛选包含已停用，且停用标签不改变行高", as
   });
   await statusFilter.click();
   const panel = page.locator(".status-filter-panel");
-  await expect(panel.getByRole("checkbox")).toHaveCount(7);
+  await expect(panel.getByRole("checkbox")).toHaveCount(8);
   await expect(
     panel.getByRole("checkbox", { name: "已停用", exact: true }),
   ).toBeChecked();
@@ -892,4 +892,50 @@ test("邮箱搜索尚未应用时禁用导出，避免使用旧筛选范围", as
   await expect(button).toBeDisabled();
   await page.clock.runFor(350);
   await expect(button).toBeEnabled();
+});
+
+test("已过期筛选包含同时停用账号，停用筛选保留原义且组合不重复", async ({
+  page,
+}) => {
+  const fixtures = [
+    ...accounts,
+    {
+      ...common,
+      id: "expired-stopped",
+      email: "expired-stopped@example.test",
+      disabled: true,
+      expires_at: "2020-01-01T00:00:00Z",
+    },
+  ];
+  await openFixture(page, false, fixtures, 5, true);
+  await page.getByRole("button", { name: "筛选状态", exact: true }).click();
+  const panel = page.locator(".status-filter-panel");
+  await expect(
+    panel.getByRole("checkbox", { name: "已过期", exact: true }),
+  ).toBeChecked();
+  await panel.getByRole("button", { name: "清空", exact: true }).click();
+  await panel.getByRole("checkbox", { name: "已过期", exact: true }).click();
+  await expect
+    .poll(() => rows(page))
+    .toEqual(["expired-stopped@example.test", "expired@example.test"]);
+  await panel.getByRole("checkbox", { name: "已停用", exact: true }).click();
+  await expect
+    .poll(() => rows(page))
+    .toEqual([
+      "expired-stopped@example.test",
+      "expired@example.test",
+      "stopped@example.test",
+    ]);
+  const bounds = await panel.boundingBox();
+  const viewport = page.viewportSize()!;
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+  await page.screenshot({
+    path: test.info().outputPath("expired-status-filter.png"),
+    animations: "disabled",
+  });
+  await panel.getByRole("checkbox", { name: "已过期", exact: true }).click();
+  await expect
+    .poll(() => rows(page))
+    .toEqual(["expired-stopped@example.test", "stopped@example.test"]);
 });

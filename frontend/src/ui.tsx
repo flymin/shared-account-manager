@@ -407,6 +407,8 @@ const eventNames: Record<string, string> = {
   account_created: "登记账号",
   account_note_added: "新增账号备注",
   account_updated: "修改账号",
+  accounts_bulk_updated: "批量修改账号",
+  quota_schedule_updated: "调整重置计划",
   account_deleted: "删除账号",
   accounts_exported: "导出账号",
   account_disabled: "停用账号",
@@ -428,6 +430,11 @@ const eventNames: Record<string, string> = {
 };
 const fieldNames: Record<string, string> = {
   tier: "类型",
+  enabled: "启用状态",
+  quota: "剩余额度",
+  reset_at: "下次重置时间",
+  health: "异常标记",
+  note: "追加备注",
   capacity: "人数上限",
   expires_at: "过期时间",
   quota_reset_interval_days: "额度重置间隔",
@@ -444,6 +451,7 @@ const fieldNames: Record<string, string> = {
 export function eventText(e: Audit) {
   const d = e.details;
   const parts: string[] = [];
+  if (e.kind === "accounts_bulk_updated") parts.push(`修改 ${d.count} 个账号`);
   if (e.kind === "accounts_exported") parts.push(`导出 ${d.count} 个账号`);
   if (e.kind === "account_note_added") parts.push(`备注 #${d.note_id}`);
   if (e.kind === "quota_bulk_reset")

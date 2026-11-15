@@ -183,3 +183,14 @@ PUBLIC_ORIGIN= python3 ops/verify_runtime.py --base-url http://localhost:8081 \
 `backend/app/` 放 API、业务规则、模型、认证与 worker，其中 `mail.py` 定义邮箱接口和通用取码流程。`plugins/backends/` 与 `plugins/templates/` 分别放邮箱后端、邮件模板及各自注册表，`plugins/common/` 放共用工具。`plugins/tools.py` 根据 TOML 组装取码工具，顶层 `plugins/__init__.py` 汇总公共调用入口。`backend/migrations/` 放迁移；`frontend/src/` 放界面和 API 客户端。`deploy/` 放镜像与服务配置，`ops/` 放运维工具，`docs/` 放文档。
 
 运维脚本统一通过 `ops/compose.sh` 调用 Compose，避免依赖调用者的工作目录。新增部署配置时使用相对项目路径和环境变量；实际主机、用户名、凭据、私有 CA 与运行数据保存在被忽略的本地文件中。
+
+
+## 账号批量编辑接口
+
+管理员通过 `POST /api/v1/account-selections` 提交 `filters`（与列表相同的 `q/tier/group_id/statuses`），取得全部匹配 `account_ids` 和 `count`；可传入 `account_ids` 求交集，空数组保持空选择。结果不分页，最多10000个账号，超出时要求缩小筛选范围。
+
+`POST /api/v1/account-bulk-edits/preview` 接收固定的 `account_ids`、`filters` 和 `changes`，返回 `count`、`fields`、`revision`。提交到 `POST /api/v1/account-bulk-edits` 时增加 `revision` 和 UUID `request_id`；写事务重新核验筛选与账号、授权及事件版本摘要，变化返回409且整批回滚。成功返回 `count/fields`。同一操作者以相同请求标识重试返回原结果，不重复追加备注。
+
+`changes` 仅处理显式提供的字段：`tier/capacity/quota_reset_interval_days/expires_at/mail_tool/enabled/group_ids/user_ids/quota/reset_at/health/note`。`health` 提供 `action=report|clear`，登记时提供类别及描述中的至少一项；`note` 仅追加，不更新历史。可空配置用null清除，授权用空数组清除；不可清空的字段不接受null。密码、身份及认证配置字段被拒绝，所有入口要求管理员、来源与CSRF校验。
+
+账号与授权、任务取消、历史和备注在同一事务中批量写入；不逐账号请求接口。审计保留原操作事件及 `accounts_bulk_updated` 汇总，重试保护只存请求摘要，不记录密码、令牌或密钥。单独修改重置计划使用 `quota_schedule_updated`，不改变人工额度更新时间。

@@ -11,16 +11,37 @@ export const DISABLED_ACCOUNT_STATUS = {
   value: "disabled",
   label: "已停用",
 } as const;
-export type AccountStatus =
-  | (typeof ACCOUNT_STATUSES)[number]["value"]
-  | (typeof DISABLED_ACCOUNT_STATUS)["value"];
+export const EXPIRED_ACCOUNT_STATUS = {
+  value: "expired",
+  label: "已过期",
+} as const;
+export const ADMIN_ACCOUNT_STATUSES = [
+  ...ACCOUNT_STATUSES,
+  DISABLED_ACCOUNT_STATUS,
+  EXPIRED_ACCOUNT_STATUS,
+];
+export type AccountStatus = (typeof ADMIN_ACCOUNT_STATUSES)[number]["value"];
 export const ALL_ACCOUNT_STATUSES: AccountStatus[] = ACCOUNT_STATUSES.map(
   (s) => s.value,
 );
-export const ALL_ADMIN_ACCOUNT_STATUSES: AccountStatus[] = [
-  ...ALL_ACCOUNT_STATUSES,
-  DISABLED_ACCOUNT_STATUS.value,
-];
+export const ALL_ADMIN_ACCOUNT_STATUSES: AccountStatus[] =
+  ADMIN_ACCOUNT_STATUSES.map((s) => s.value);
+
+export function isAccountExpired(a: Account, time = Date.now()) {
+  return a.expires_at !== null && new Date(a.expires_at).getTime() <= time;
+}
+export function matchesAccountStatuses(
+  a: Account,
+  statuses: string | null,
+  time = Date.now(),
+) {
+  if (statuses === null) return true;
+  const chosen = statuses.split(",");
+  return (
+    chosen.includes(accountStatus(a)) ||
+    (chosen.includes("expired") && isAccountExpired(a, time))
+  );
+}
 
 export function accountStatus(a: Account): AccountStatus {
   if (a.disabled) return DISABLED_ACCOUNT_STATUS.value;

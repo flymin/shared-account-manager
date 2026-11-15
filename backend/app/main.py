@@ -10,7 +10,16 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, delete, func, text, or_, and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import load_only
-from . import auth, config, queries, quota_resets, totp, domain as d, schemas as s
+from . import (
+    auth,
+    bulk_accounts,
+    config,
+    queries,
+    quota_resets,
+    totp,
+    domain as d,
+    schemas as s,
+)
 from .db import get_db
 from .models import (
     User,
@@ -491,6 +500,33 @@ def delete_account(
         a.deleted = True
         d.event(db, "account_deleted", user, a, {"reason": data.reason.strip()})
     return {"ok": True}
+
+
+@app.post("/api/v1/account-selections")
+def resolve_account_selection(
+    data: s.AccountSelectionInput,
+    user=Depends(auth.admin),
+    db=Depends(get_db, scope="function"),
+):
+    return bulk_accounts.resolve_selection(db, user, data)
+
+
+@app.post("/api/v1/account-bulk-edits/preview")
+def preview_account_bulk_edit(
+    data: s.BulkAccountPreviewInput,
+    user=Depends(auth.admin),
+    db=Depends(get_db, scope="function"),
+):
+    return bulk_accounts.preview(db, user, data)
+
+
+@app.post("/api/v1/account-bulk-edits", status_code=201)
+def account_bulk_edit(
+    data: s.BulkAccountEditInput,
+    user=Depends(auth.admin),
+    db=Depends(get_db, scope="function"),
+):
+    return bulk_accounts.execute(db, user, data)
 
 
 @app.post("/api/v1/account-quota-resets/preview")

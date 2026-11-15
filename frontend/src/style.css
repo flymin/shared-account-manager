@@ -1404,3 +1404,167 @@ small {
 .account-notes-entry {
   margin: 12px 0;
 }
+
+.account-selection-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.filter-actions.has-selection {
+  flex-wrap: wrap;
+}
+.selection-count {
+  color: #78867f;
+  font-size: 12px;
+  white-space: nowrap;
+  margin-inline: 2px;
+}
+.selection-count b {
+  color: #276a58;
+}
+.bulk-edit-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.bulk-edit-summary .muted {
+  font-size: 12px;
+}
+.bulk-edit-section {
+  margin-block: 14px;
+}
+.bulk-edit-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64796d;
+  margin: 0 0 4px;
+}
+.bulk-edit-field {
+  border-bottom: 1px solid #edf1ee;
+}
+.bulk-edit-field-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 38px;
+}
+.bulk-edit-field-heading > label {
+  font-size: 13px;
+}
+.bulk-edit-field .ant-form-item {
+  margin: 2px 0 10px;
+}
+.bulk-edit-field .ant-form-item-label {
+  padding-bottom: 4px;
+}
+.bulk-edit-field .ant-form-item-extra {
+  font-size: 12px;
+}
+.bulk-edit-field.is-enabled {
+  padding-bottom: 2px;
+}
+.bulk-edit-preview {
+  margin-top: 12px;
+}
+.bulk-edit-modal .ant-modal-body {
+  max-height: calc(100dvh - 240px);
+  overflow-y: auto;
+}
+.bulk-edit-modal .dialog-footer {
+  position: sticky;
+  bottom: 0;
+  background: white;
+  padding: 12px 0 2px;
+  margin-top: 12px;
+  z-index: 2;
+}
+@media (max-width: 767px) {
+  .account-filters > .filter-actions.has-selection {
+    flex: 1 1 100%;
+  }
+  .has-selection .account-selection-actions {
+    flex-basis: 100%;
+  }
+  .account-card .card-top > .ant-checkbox-wrapper {
+    margin-inline-end: 0;
+  }
+  .bulk-edit-modal {
+    top: 20px;
+    padding-bottom: 20px;
+  }
+  .bulk-edit-modal .ant-modal-body {
+    max-height: calc(100dvh - 160px);
+  }
+}
+
+.bulk-edit-changes {
+  margin: 0 0 6px;
+}
+.bulk-edit-changes > div {
+  display: flex;
+  gap: 10px;
+  padding-block: 2px;
+}
+.bulk-edit-changes dt {
+  flex: 0 0 100px;
+  color: #64796d;
+}
+.bulk-edit-changes dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.account-selection-actions .selection-count {
+  margin-inline: 4px;
+}
+.desktop-table .ant-table-tbody > tr.ant-table-row-selected > td {
+  background: #eef6f1 !important;
+}
+.bulk-edit-feedback {
+  scroll-margin-bottom: 64px;
+}
+.bulk-edit-modal .ant-modal-body {
+  scroll-padding-bottom: 64px;
+}
+
+.selection-caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+@media (max-width: 767px) {
+  .account-filters > .filter-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .account-filters .filter-actions .ant-btn {
+    height: 32px;
+    font-size: 12px;
+    padding-inline: 10px;
+    gap: 4px;
+  }
+  .account-filters .filter-actions > .ant-btn-icon-only {
+    width: 32px;
+    padding: 0;
+  }
+  .filter-actions.has-selection .account-selection-actions {
+    justify-content: flex-start;
+  }
+}
+
+.bulk-edit-preview.ant-alert-info {
+  background: #f3f8f5;
+  border-color: #d5e8dc;
+}
+
+@media (max-width: 767px) {
+  .filter-actions.has-selection .account-selection-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+}
