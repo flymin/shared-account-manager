@@ -905,6 +905,13 @@ def account_options(
     return {**cfg.account_options, "cooldown_hours": cfg.cooldown_hours}
 
 
+@app.get("/api/v1/account-options/usage")
+def account_option_usage(
+    user=Depends(auth.admin), db=Depends(get_db, scope="function")
+):
+    return {"active_by_tier": queries.active_accounts_by_tier(db)}
+
+
 @app.get("/api/v1/settings")
 def get_settings(user=Depends(auth.admin), db=Depends(get_db, scope="function")):
     cfg = d.settings(db)

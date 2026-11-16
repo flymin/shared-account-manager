@@ -8,8 +8,9 @@ from sqlalchemy import select
 from app.config import default_account_options
 from app.db import Session
 from app.main import app
-from app.models import Account, Event
+from app.models import Account, Claim, Event
 from test_business import P, claim, normal_return, run_clock
+from test_queries import selects
 
 
 def save(admin, cfg):
@@ -120,6 +121,112 @@ def test_referenced_options_cannot_be_removed_and_unused_options_can(
     cfg["account_options"]["tiers"].pop(1)
     cfg["account_options"]["anomaly_categories"].pop(1)
     save(admin, cfg)
+
+
+def test_disabled_tiers_are_hidden_from_hall_before_paging_but_keep_claims(
+    admin, make_user, make_account
+):
+    user, client = make_user()
+    active = [
+        make_account(email=f"active{i}@example.test", users=[user["id"]])
+        for i in range(3)
+    ]
+    private = make_account(email="private@example.test")
+    response = admin.post(
+        P + "/account-imports",
+        json={
+            "tier": "20x",
+            "text": "\n".join(
+                f"retired{i}@example.test----fictional-password----fictional-mailbox"
+                for i in range(3)
+            ),
+            "user_ids": [user["id"]],
+        },
+    )
+    assert response.status_code == 201
+    retired = admin.get(P + "/accounts?tier=20x").json()
+    held = claim(client, retired[0]).json()
+    cfg = admin.get(P + "/settings").json()
+    retired_type = next(t for t in cfg["account_options"]["tiers"] if t["id"] == "20x")
+    retired_type["enabled"] = False
+    save(admin, cfg)
+
+    for viewer in (admin, client):
+        expected = {a["id"] for a in active}
+        if viewer is admin:
+            expected.add(private["id"])
+        params = {"scope": "hall", "sort_by": "email", "limit": 2}
+        with selects() as sql:
+            first = viewer.get(P + "/accounts", params=params)
+        assert first.status_code == 200 and len(sql) <= 14
+        assert int(first.headers["X-Total-Count"]) == len(expected)
+        last = viewer.get(P + "/accounts", params={**params, "offset": 2})
+        assert {a["id"] for a in first.json() + last.json()} == expected
+        for filters in ({"tier": "20x"}, {"q": "retired"}):
+            empty = viewer.get(P + "/accounts", params={**params, **filters})
+            assert empty.json() == [] and empty.headers["X-Total-Count"] == "0"
+        # Management reads, detail reads and existing claims retain the accounts.
+        assert len(viewer.get(P + "/accounts?tier=20x").json()) == 3
+        assert viewer.get(P + f"/accounts/{retired[0]['id']}").status_code == 200
+
+    assert client.get(P + "/claims").json()[0]["account"]["tier"] == "20x"
+    assert normal_return(client, held).status_code == 200
+    assert client.get(P + "/claims?history=true").json()[0]["account"]["tier"] == "20x"
+    retired_type["enabled"] = True
+    save(admin, cfg)
+    assert len(client.get(P + "/accounts?scope=hall&tier=20x").json()) == 3
+
+
+def test_type_activity_warning_counts_are_grouped_admin_only_and_advisory(
+    admin, make_user, make_account, monkeypatch
+):
+    from app import queries
+    from app.models import now
+
+    user, client = make_user()
+    stamp = now()
+    rows = [
+        make_account(email=f"activity{i}@example.test", users=[user["id"]])
+        for i in range(8)
+    ]
+    with Session.begin() as db:
+        db.add(Claim(account_id=rows[0]["id"], user_id=user["id"]))
+        for i, row in enumerate(rows):
+            account = db.get(Account, row["id"])
+            if i == 1:
+                # Depleted quota, full occupancy and health do not exclude activity.
+                account.quota = 0
+                account.health = "abnormal"
+            if i == 2:
+                account.expires_at = stamp + timedelta(minutes=1)
+            if i == 3:
+                account.disabled = True
+            if i == 4:
+                account.expires_at = stamp - timedelta(seconds=1)
+            if i == 5:
+                account.expires_at = stamp
+            if i == 6:
+                account.deleted = True
+            if i == 7:
+                account.tier = "20x"
+    monkeypatch.setattr(queries, "now", lambda: stamp)
+    with selects() as sql:
+        response = admin.get(P + "/account-options/usage")
+    assert response.status_code == 200
+    assert response.json() == {"active_by_tier": {"5x": 3, "20x": 1}}
+    assert sum("GROUP BY accounts.tier" in q for q in sql) == 1 and len(sql) <= 5
+    assert response.headers["cache-control"] == "no-store"
+    assert client.get(P + "/account-options/usage").status_code == 403
+    assert TestClient(app).get(P + "/account-options/usage").status_code == 401
+    cfg = admin.get(P + "/settings").json()
+    cfg["account_options"]["tiers"][0]["enabled"] = False
+    # The warning helps administrators check; active accounts do not forbid disabling.
+    assert admin.put(P + "/settings", json=cfg).status_code == 200
+    assert admin.get(P + "/account-options/usage").json() == response.json()
+    monkeypatch.setattr(queries, "now", lambda: stamp + timedelta(minutes=1))
+    assert admin.get(P + "/account-options/usage").json() == {
+        "active_by_tier": {"5x": 2, "20x": 1}
+    }
 
 
 def test_dynamic_anomalies_rename_disable_and_maintain_return(

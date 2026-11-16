@@ -36,12 +36,14 @@ import {
   type GroupOption,
   type PersonOption,
   type Settings,
+  type AccountOptionUsage,
   type Audit,
 } from "./api";
 import { Pool } from "./Accounts";
 import { MailToolField } from "./MailToolField";
 import {
   AccountOptionsEditor,
+  newlyDisabledTiers,
   TierField,
   useTierFilters,
 } from "./AccountOptions";
@@ -646,7 +648,15 @@ export function SystemSettings({
   refresh: () => void;
 }) {
   const { data, error } = useResource<Settings>("/settings", epoch);
-  const { message } = App.useApp();
+  const { data: usage, error: usageError } = useResource<AccountOptionUsage>(
+    "/account-options/usage",
+    epoch,
+  );
+  const [freshUsage, setFreshUsage] = useState<AccountOptionUsage>();
+  useEffect(() => setFreshUsage(undefined), [usage]);
+  const { message, modal } = App.useApp();
+  const [saving, setSaving] = useState(false);
+  const savePending = useRef(false);
   return (
     <Card className="settings-card">
       {error && <Alert type="error" message={error} />}
@@ -659,13 +669,64 @@ export function SystemSettings({
           key={JSON.stringify(data)}
           layout="vertical"
           initialValues={data}
+          disabled={saving}
           onFinish={async (v) => {
+            if (savePending.current) return;
+            savePending.current = true;
+            setSaving(true);
+            const session = getSessionVersion();
             try {
+              const disabled = newlyDisabledTiers(
+                data.account_options.tiers,
+                v.account_options.tiers,
+              );
+              if (disabled.length) {
+                // Recheck all changed types in one request at confirmation time.
+                const current = await api<AccountOptionUsage>(
+                  "/account-options/usage",
+                );
+                if (session !== getSessionVersion()) return;
+                setFreshUsage(current);
+                const active = disabled.filter(
+                  (item) => (current.active_by_tier[item.id] ?? 0) > 0,
+                );
+                if (active.length) {
+                  const confirmed = await new Promise<boolean>((resolve) => {
+                    modal.confirm({
+                      title: "停用类型前请检查活动账号",
+                      content: (
+                        <>
+                          <p>
+                            {active
+                              .map(
+                                (item) =>
+                                  `${item.name}：${current.active_by_tier[item.id]} 个活动账号`,
+                              )
+                              .join("；")}
+                          </p>
+                          <p>
+                            这些账号尚未停用且未过期，停用类型后会从账号大厅隐藏，已有领用保留。请先在账号管理按类型筛选并检查。
+                          </p>
+                        </>
+                      ),
+                      okText: "仍然停用并保存",
+                      cancelText: "返回检查",
+                      onOk: () => resolve(true),
+                      onCancel: () => resolve(false),
+                    });
+                  });
+                  if (!confirmed) return;
+                }
+              }
+              if (session !== getSessionVersion()) return;
               await api("/settings", "PUT", v);
               refresh();
               message.success("设置已保存");
             } catch (e) {
               message.error((e as Error).message);
+            } finally {
+              savePending.current = false;
+              setSaving(false);
             }
           }}
         >
@@ -699,12 +760,21 @@ export function SystemSettings({
           >
             <InputNumber min={1} max={100} precision={0} />
           </Form.Item>
-          <AccountOptionsEditor />
+          <AccountOptionsEditor
+            initialTiers={data.account_options.tiers}
+            usage={freshUsage ?? usage}
+            usageError={freshUsage ? "" : usageError}
+          />
           <Alert
             type="info"
             message="调整间隔会按异常原有时间起点计算，下次检查时生效。领用观察达标或异常冷却结束，任一条件满足均会标记为“可能恢复”；类别间隔仅覆盖冷却规则。"
           />
-          <Button type="primary" htmlType="submit">
+          <Button
+            type="primary"
+            htmlType="submit"
+            aria-label="保存设置"
+            loading={saving}
+          >
             保存设置
           </Button>
         </Form>

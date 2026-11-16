@@ -171,6 +171,7 @@ export type Audit = {
   target_display_name?: string | null;
 };
 export type AccountOption = { id: string; name: string; enabled: boolean };
+export type AccountOptionUsage = { active_by_tier: Record<string, number> };
 export type AnomalyCategory = AccountOption & { cooldown_hours: number | null };
 export type AccountOptions = {
   tiers: AccountOption[];

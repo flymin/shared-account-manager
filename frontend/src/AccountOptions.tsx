@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, type ReactNode } from "react";
 import { Alert, Button, Form, Input, InputNumber, Select, Switch } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import type { AccountOptions } from "./api";
+import type { AccountOption, AccountOptions, AccountOptionUsage } from "./api";
 import { useResource } from "./ui";
 
 type Catalog = AccountOptions & { cooldown_hours: number };
@@ -27,14 +27,16 @@ export function AccountOptionsProvider({
 
 export const useAccountOptions = () => useContext(OptionsContext);
 
-export function useTierFilters() {
+export function useTierFilters({ includeDisabled = true } = {}) {
   const { data } = useAccountOptions();
   return [
     { value: "all", label: "全部类型" },
-    ...(data?.tiers || []).map((item) => ({
-      value: item.id,
-      label: item.name + (item.enabled ? "" : "（已停用）"),
-    })),
+    ...(data?.tiers || [])
+      .filter((item) => includeDisabled || item.enabled)
+      .map((item) => ({
+        value: item.id,
+        label: item.name + (item.enabled ? "" : "（已停用）"),
+      })),
   ];
 }
 
@@ -130,10 +132,64 @@ export function AnomalyField() {
   );
 }
 
-export function AccountOptionsEditor() {
+export function newlyDisabledTiers(
+  previous: AccountOption[],
+  next: AccountOption[],
+) {
+  const enabled = new Set(
+    previous.filter((item) => item.enabled).map((item) => item.id),
+  );
+  return next.filter((item) => !item.enabled && enabled.has(item.id));
+}
+
+export function AccountOptionsEditor({
+  initialTiers,
+  usage,
+  usageError,
+}: {
+  initialTiers: AccountOption[];
+  usage?: AccountOptionUsage;
+  usageError: string;
+}) {
+  const tiers = Form.useWatch(["account_options", "tiers"]) ?? initialTiers;
+  const disabled = newlyDisabledTiers(initialTiers, tiers);
+  const active = disabled.filter(
+    (item) => (usage?.active_by_tier[item.id] ?? 0) > 0,
+  );
   return (
     <>
       <OptionsList kind="tiers" title="账号类型" />
+      {disabled.length > 0 &&
+        (usageError ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="活动账号检查暂不可用，保存停用时会重新检查。"
+          />
+        ) : !usage ? (
+          <Alert type="info" showIcon message="正在检查待停用类型的活动账号…" />
+        ) : active.length > 0 ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="待停用类型仍有活动账号，请先检查"
+            description={
+              <>
+                <p>
+                  {active
+                    .map(
+                      (item) =>
+                        `${item.name}：${usage.active_by_tier[item.id]} 个`,
+                    )
+                    .join("；")}
+                </p>
+                <p>
+                  活动账号指未停用且未过期的账号，包含异常、额度耗尽或人数已满的账号。停用类型会将它们从账号大厅隐藏；检查后仍可保存停用。
+                </p>
+              </>
+            }
+          />
+        ) : null)}
       <OptionsList kind="anomaly_categories" title="异常类别" />
     </>
   );
@@ -155,7 +211,7 @@ function OptionsList({
       <p className="muted">
         {anomaly
           ? `恢复间隔留空沿用全局 ${defaultHours ?? "—"} 小时；多选取最长间隔，只有自由文本时沿用全局值。`
-          : "至少保留一个启用类型。改名会同步更新账号显示，停用后不能用于新登记或转入。"}
+          : "至少保留一个启用类型。改名会同步更新账号显示；停用后不能用于新登记或转入，并从账号大厅及其类型筛选中隐藏，已有领用和历史记录保留。"}
       </p>
       <Form.List
         name={["account_options", kind]}

@@ -11,7 +11,7 @@ async function nav(page: Page, name: string) {
   ).click();
 }
 
-async function fixture(page: Page, admin = true) {
+async function fixture(page: Page, admin = true, includeRetired = false) {
   const state = {
     cfg: {
       user_claim_limit: 1,
@@ -48,13 +48,19 @@ async function fixture(page: Page, admin = true) {
     reports: [] as any[],
     edits: [] as any[],
     optionsReads: 0,
+    activeByTier: { standard: 1, legacy: 0 } as Record<string, number>,
+    usageReads: 0,
+    usageFailure: false,
+    settingsWrites: 0,
   };
-  function account() {
+  function account(tier = "standard") {
     return {
-      id: "example-account",
-      email: "example@example.test",
-      tier: "standard",
-      tier_name: state.cfg.account_options.tiers[0].name,
+      id: tier === "standard" ? "example-account" : "retired-account",
+      email:
+        tier === "standard" ? "example@example.test" : "retired@example.test",
+      tier,
+      tier_name: state.cfg.account_options.tiers.find((t) => t.id === tier)
+        ?.name,
       mail_tool: null,
       mail_tool_name: null,
       disabled: false,
@@ -109,10 +115,37 @@ async function fixture(page: Page, admin = true) {
       });
     }
     if (path === "/settings") {
-      if (method === "PUT") state.cfg = request.postDataJSON();
+      if (method === "PUT") {
+        state.settingsWrites += 1;
+        state.cfg = request.postDataJSON();
+      }
       return send(state.cfg);
     }
-    if (path === "/accounts") return send([account()]);
+    if (path === "/account-options/usage") {
+      state.usageReads += 1;
+      if (state.usageFailure)
+        return route.fulfill({
+          status: 503,
+          json: { detail: "活动账号检查暂不可用" },
+        });
+      return send({ active_by_tier: state.activeByTier });
+    }
+    if (path === "/accounts") {
+      const scope = new URL(request.url()).searchParams.get("scope");
+      const accounts = [
+        account(),
+        ...(includeRetired ? [account("legacy")] : []),
+      ];
+      return send(
+        accounts.filter(
+          (a) =>
+            scope !== "hall" ||
+            state.cfg.account_options.tiers.some(
+              (t) => t.id === a.tier && t.enabled,
+            ),
+        ),
+      );
+    }
     if (path === "/accounts/example-account" && method === "GET")
       return send(account());
     if (path === "/mail-tools") return send({ default: null, items: [] });
@@ -289,7 +322,7 @@ test("异常反馈使用动态多选类别，页面聚焦同步运行中的配�
   expect(state.reports[1].categories).toEqual(["new"]);
 });
 
-test("普通用户可使用动态档位筛选，不能进入配置页", async ({ page }) => {
+test("普通用户仅筛选启用类型，不能进入配置页", async ({ page }) => {
   await fixture(page, false);
   const navArea = (await page.locator(".mobile-nav").isVisible())
     ? page.locator(".mobile-nav")
@@ -308,9 +341,237 @@ test("普通用户可使用动态档位筛选，不能进入配置页", async ({
     .locator(".filter-bar")
     .getByTitle("标准档", { exact: true })
     .click();
+  await expect(
+    page
+      .locator(".ant-select-dropdown:visible")
+      .getByText("旧档位（已停用）", { exact: true }),
+  ).toHaveCount(0);
+});
+
+test("大厅隐藏停用类型及账号，管理员账号管理保留类型筛选", async ({ page }) => {
+  await fixture(page, true, true);
+  await expect(page.locator(".list-caption strong")).toHaveText("1");
+  await expect(
+    page
+      .getByText("retired@example.test", { exact: true })
+      .filter({ visible: true }),
+  ).toHaveCount(0);
   await page
-    .locator(".ant-select-item-option-content")
-    .getByText("旧档位（已停用）", { exact: true })
+    .getByRole("combobox", { name: "筛选类型", exact: true })
+    .press("ArrowDown");
+  const dropdown = page.locator(".ant-select-dropdown:visible");
+  await expect(
+    dropdown.getByText("旧档位（已停用）", { exact: true }),
+  ).toHaveCount(0);
+  await expect
+    .poll(() =>
+      dropdown.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          getComputedStyle(element).opacity === "1" &&
+          rect.width > 100 &&
+          rect.height > 20 &&
+          rect.x >= 0 &&
+          rect.right <= innerWidth
+        );
+      }),
+    )
+    .toBe(true);
+  const bounds = await dropdown.boundingBox();
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(
+    page.viewportSize()!.width,
+  );
+  await page.screenshot({
+    path: test.info().outputPath("enabled-hall-types.png"),
+    animations: "disabled",
+  });
+  await page
+    .getByRole("combobox", { name: "筛选类型", exact: true })
+    .press("Escape");
+  await nav(page, "账号管理");
+  await expect(page.locator(".list-caption strong")).toHaveText("2");
+  await expect(
+    page
+      .getByText("retired@example.test", { exact: true })
+      .filter({ visible: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("combobox", { name: "筛选类型", exact: true })
+    .press("ArrowDown");
+  await dropdown.getByText("旧档位（已停用）", { exact: true }).click();
+  await expect(page.locator(".list-caption strong")).toHaveText("1");
+  await expect(
+    page
+      .getByText("retired@example.test", { exact: true })
+      .filter({ visible: true }),
+  ).toBeVisible();
+});
+
+for (const admin of [false, true]) {
+  test(`${admin ? "管理员" : "普通用户"}大厅已选类型停用后恢复全部，重新启用后显示`, async ({
+    page,
+  }) => {
+    const state = await fixture(page, admin, true);
+    const select = page.getByRole("combobox", {
+      name: "筛选类型",
+      exact: true,
+    });
+    await select.press("ArrowDown");
+    await page
+      .locator(".ant-select-dropdown:visible")
+      .getByText("标准档", { exact: true })
+      .click();
+    state.cfg.account_options.tiers[0].enabled = false;
+    state.cfg.account_options.tiers[1].enabled = true;
+    const reads = state.optionsReads;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect.poll(() => state.optionsReads).toBeGreaterThan(reads);
+    await expect(
+      page.locator(".filter-bar").getByTitle("全部类型", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByText("retired@example.test", { exact: true })
+        .filter({ visible: true }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByText("example@example.test", { exact: true })
+        .filter({ visible: true }),
+    ).toHaveCount(0);
+    await select.press("ArrowDown");
+    await expect(
+      page
+        .locator(".ant-select-dropdown:visible")
+        .getByText("标准档", { exact: true }),
+    ).toHaveCount(0);
+    await select.press("Escape");
+    state.cfg.account_options.tiers[0].enabled = true;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.locator(".list-caption strong")).toHaveText("2");
+    await expect(
+      page
+        .getByText("example@example.test", { exact: true })
+        .filter({ visible: true }),
+    ).toBeVisible();
+  });
+}
+
+async function disableStandard(page: Page) {
+  await nav(page, "系统设置");
+  const region = page.getByRole("region", { name: "账号类型配置" });
+  // Retain one enabled type, as required by the existing catalog validation.
+  await region.getByRole("switch").nth(1).click();
+  await region.getByRole("switch").first().click();
+  return region;
+}
+
+test("停用提示可返回检查或继续保存，保存前核对最新活动账号数量", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  const region = await disableStandard(page);
+  const warning = page
+    .getByRole("alert")
+    .filter({ hasText: "待停用类型仍有活动账号" });
+  await expect(warning).toContainText("标准档：1 个");
+  state.activeByTier.standard = 3;
+  await page.getByRole("button", { name: "保存设置", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("标准档：3 个活动账号");
+  expect(state.settingsWrites).toBe(0);
+  await expect
+    .poll(() =>
+      dialog.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          getComputedStyle(element).opacity === "1" &&
+          rect.width > 100 &&
+          rect.height > 100 &&
+          rect.x >= 0 &&
+          rect.y >= 0 &&
+          rect.right <= innerWidth &&
+          rect.bottom <= innerHeight
+        );
+      }),
+    )
+    .toBe(true);
+  await page.screenshot({
+    path: test.info().outputPath("type-disable-warning.png"),
+    animations: "disabled",
+  });
+  const bounds = await dialog.boundingBox();
+  expect(bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  await dialog.getByRole("button", { name: "返回检查", exact: true }).click();
+  expect(state.settingsWrites).toBe(0);
+  await expect(region.getByRole("switch").first()).not.toBeChecked();
+  await expect(warning).toContainText("标准档：3 个");
+  state.activeByTier.standard = 4;
+  await page.getByRole("button", { name: "保存设置", exact: true }).click();
+  await expect(dialog).toContainText("标准档：4 个活动账号");
+  await dialog
+    .getByRole("button", { name: "仍然停用并保存", exact: true })
     .click();
-  await expect(page.locator(".list-caption strong")).toHaveText("0");
+  await expect.poll(() => state.settingsWrites).toBe(1);
+  expect(state.cfg.account_options.tiers[0].enabled).toBe(false);
+});
+
+test("没有活动账号时直接保存停用，不额外要求确认", async ({ page }) => {
+  const state = await fixture(page);
+  state.activeByTier.standard = 0;
+  await disableStandard(page);
+  await page.getByRole("button", { name: "保存设置", exact: true }).click();
+  await expect.poll(() => state.settingsWrites).toBe(1);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(state.cfg.account_options.tiers[0].enabled).toBe(false);
+});
+
+test("检查失败不保存停用，重试成功后仍可确认", async ({ page }) => {
+  const state = await fixture(page);
+  await disableStandard(page);
+  state.usageFailure = true;
+  const save = page.getByRole("button", { name: "保存设置", exact: true });
+  await save.click();
+  await expect(page.locator(".ant-message")).toContainText(
+    "活动账号检查暂不可用",
+  );
+  expect(state.settingsWrites).toBe(0);
+  await expect(save).toBeEnabled();
+  state.usageFailure = false;
+  await save.click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "仍然停用并保存", exact: true })
+    .click();
+  await expect.poll(() => state.settingsWrites).toBe(1);
+});
+
+test("多个待停用类型合并检查并逐项列出活动账号", async ({ page }) => {
+  const state = await fixture(page);
+  state.cfg.account_options.tiers[1].enabled = true;
+  state.cfg.account_options.tiers.push({
+    id: "remaining",
+    name: "保留类型",
+    enabled: true,
+  });
+  state.activeByTier = { standard: 2, legacy: 3 };
+  await nav(page, "系统设置");
+  const region = page.getByRole("region", { name: "账号类型配置" });
+  await region.getByRole("switch").nth(0).click();
+  await region.getByRole("switch").nth(1).click();
+  const before = state.usageReads;
+  await page.getByRole("button", { name: "保存设置", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("标准档：2 个活动账号");
+  await expect(dialog).toContainText("旧档位：3 个活动账号");
+  expect(state.usageReads).toBe(before + 1);
+  await dialog
+    .getByRole("button", { name: "仍然停用并保存", exact: true })
+    .click();
+  await expect.poll(() => state.settingsWrites).toBe(1);
+  expect(state.cfg.account_options.tiers.map((t) => t.enabled)).toEqual([
+    false,
+    false,
+    true,
+  ]);
 });

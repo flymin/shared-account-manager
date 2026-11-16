@@ -136,6 +136,9 @@ def filtered_accounts(
         query = query.where(
             Account.disabled.is_(False),
             or_(Account.expires_at.is_(None), Account.expires_at > stamp),
+            Account.tier.in_(
+                item["id"] for item in cfg.account_options["tiers"] if item["enabled"]
+            ),
         )
     if user.role != "admin":
         query = query.where(visible_clause(user.id))
@@ -175,6 +178,22 @@ def filtered_accounts(
                 conditions.append(Account.expires_at <= stamp)
             query = query.where(or_(false(), *conditions))
     return query
+
+
+def active_accounts_by_tier(db):
+    """One grouped read; activity is independent of quota, health and type state."""
+    stamp = now()
+    return dict(
+        db.execute(
+            select(Account.tier, func.count())
+            .where(
+                Account.deleted.is_(False),
+                Account.disabled.is_(False),
+                or_(Account.expires_at.is_(None), Account.expires_at > stamp),
+            )
+            .group_by(Account.tier)
+        ).all()
+    )
 
 
 def account_page(

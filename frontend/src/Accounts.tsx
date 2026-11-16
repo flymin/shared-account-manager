@@ -52,7 +52,12 @@ import {
 } from "./accountList";
 import { AccountStatusFilter } from "./AccountStatusFilter";
 import { MailToolField } from "./MailToolField";
-import { AnomalyField, TierField, useTierFilters } from "./AccountOptions";
+import {
+  AnomalyField,
+  TierField,
+  useAccountOptions,
+  useTierFilters,
+} from "./AccountOptions";
 import {
   Credentials,
   CopyButton,
@@ -297,7 +302,8 @@ export function Pool({
     | ReactNode
     | ((context: { filters: URLSearchParams; disabled: boolean }) => ReactNode);
 }) {
-  const tierFilters = useTierFilters();
+  const tierFilters = useTierFilters({ includeDisabled: adminMode });
+  const { data: accountOptions } = useAccountOptions();
   const { message, modal } = App.useApp();
   const [q, setQ] = useState(""),
     [tier, setTier] = useState("all"),
@@ -314,6 +320,18 @@ export function Pool({
   };
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
+  const tierAvailable =
+    adminMode ||
+    !accountOptions ||
+    tier === "all" ||
+    accountOptions.tiers.some((item) => item.id === tier && item.enabled);
+  const effectiveTier = tierAvailable ? tier : "all";
+  useEffect(() => {
+    if (!tierAvailable) {
+      setTier("all");
+      setCurrentPage(1);
+    }
+  }, [tierAvailable]);
   const [search, setSearch] = useState("");
   useEffect(() => {
     if (q === search) return;
@@ -327,13 +345,16 @@ export function Pool({
     q: search,
     statuses: [...statuses].sort().join(","),
   });
-  if (tier !== "all") filters.set("tier", tier);
+  if (effectiveTier !== "all") filters.set("tier", effectiveTier);
   if (group !== "all") filters.set("group_id", group);
   const params = new URLSearchParams(filters);
   params.set("scope", adminMode ? "all" : "hall");
   params.set("sort_by", effectiveSort.key);
   params.set("order", effectiveSort.order === "ascend" ? "asc" : "desc");
-  params.set("offset", String((currentPage - 1) * pageSize));
+  params.set(
+    "offset",
+    String(((tierAvailable ? currentPage : 1) - 1) * pageSize),
+  );
   params.set("limit", String(pageSize));
   const { data: result, error } = usePageResource<Account>(
     `/accounts?${params}`,
@@ -346,7 +367,7 @@ export function Pool({
   const selectionFilters: AccountFilters = {
     q: search,
     statuses: [...statuses].sort().join(","),
-    tier: tier === "all" ? null : tier,
+    tier: effectiveTier === "all" ? null : effectiveTier,
     group_id: group === "all" ? null : group,
   };
   const selection = useAccountSelection(selectionFilters, epoch);
@@ -600,7 +621,7 @@ export function Pool({
           />
           <Select
             aria-label="筛选类型"
-            value={tier}
+            value={effectiveTier}
             onChange={(value) => {
               setTier(value);
               setCurrentPage(1);
