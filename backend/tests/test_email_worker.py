@@ -1,4 +1,5 @@
 from datetime import timedelta
+import logging
 from uuid import uuid4
 
 from app.config import cipher
@@ -45,6 +46,30 @@ def start(admin, account):
     )
     assert response.status_code == 201
     return response.json()["id"]
+
+
+def test_authentication_diagnostics_do_not_log_credentials(admin, make_account, caplog):
+    account = make_account()
+    identity = start(admin, account)
+
+    class RejectedMailbox(Mailbox):
+        def iter_unread(self, since, deadline):
+            raise MailError("authentication", stage="token", http_status=403)
+
+    caplog.set_level(logging.WARNING, logger="account-manager.email")
+    worker = EmailWorker(factory=RejectedMailbox)
+    try:
+        worker.process(*lease_next())
+    finally:
+        worker.close()
+    with Session() as db:
+        run = db.get(EmailCodeRun, identity)
+        assert run.status == "failed" and run.error == "authentication"
+    assert "stage=token http_status=403" in caplog.text
+    assert (
+        "fictional-password" not in caplog.text and "fictional-auth" not in caplog.text
+    )
+    assert account["email"] not in caplog.text
 
 
 def test_removed_mail_rules_stop_existing_jobs_before_provider_access(

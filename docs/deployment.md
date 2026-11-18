@@ -37,9 +37,9 @@ curl --fail http://localhost:8080/api/ready
 | `LOGIN_RATE_PER_MINUTE` | `30` | 所有 API 实例共享的登录校验预算补充速率，每分钟1–120次 |
 | `LOGIN_BURST` | `10` | 登录预算可积累的突发额度，1–20次 |
 | `MAIL_TOOLS_CONFIG_PATH` | 空，使用内置配置 | 自定义取码工具 TOML 文件，路径相对于 `deploy/` |
-| `MAIL_CODE_SENDER` | 空 | 六位数字验证码模板的完整发件人地址，精确匹配 |
+| `MAIL_CODE_SENDER` | 空 | 六位数字模板的发件人地址；支持受限的域名前缀模式，见插件指南 |
 | `MAIL_CODE_SUBJECT_KEYWORD` | 空 | 六位数字验证码模板的主题必须包含的固定关键词，不区分大小写 |
-| `OUTLOOK_CODE_SENDER` | 空 | Outlook 工具使用的验证码发件人地址 |
+| `OUTLOOK_CODE_SENDER` | 空 | Outlook 工具使用的验证码发件人地址或相同的受限域名前缀模式 |
 | `OUTLOOK_CODE_SUBJECT_KEYWORD` | 空 | Outlook 工具使用的验证码主题关键词 |
 | `OUTLOOK_MANUAL_CLIENT_ID` | 空 | 启用 Outlook manual 工具的部署级公共 Client ID |
 | `BUILD_NETWORK` | `default` | Docker 构建网络，必要时可设置为 `host` |

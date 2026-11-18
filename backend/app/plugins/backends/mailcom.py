@@ -191,12 +191,21 @@ class MailComClient:
                 "Referer": self.home_url,
             },
         )
+        if urlsplit(str(response.url)).hostname in {
+            "support." + domain for domain in self.provider_domains
+        }:
+            # A provider help redirect is not proof of an incorrect password.
+            raise MailError(
+                "login_restricted", stage="login", http_status=response.status_code
+            )
         response = self.handle_totp(response)
         match = re.search(r"new\s+FeatureDetection\s*\(\s*", response.text)
         if not match:
             if "captcha" in response.text.lower():
                 raise MailError("challenge")
-            raise MailError("authentication")
+            raise MailError(
+                "authentication", stage="login", http_status=response.status_code
+            )
         detection, _ = json.JSONDecoder().raw_decode(response.text[match.end() :])
         capabilities = dict.fromkeys(
             (
@@ -351,7 +360,9 @@ class MailComClient:
             headers={"Origin": self.origin, "Referer": self.referer},
         )
         if result.status_code != 200:
-            raise MailError("authentication")
+            raise MailError(
+                "authentication", stage="token", http_status=result.status_code
+            )
         data = result.json()
         self.tokens[scope] = (
             data["access_token"],
@@ -379,7 +390,9 @@ class MailComClient:
             headers["Content-Type"] = content_type
         result = self.request(method, url, headers=headers, **kwargs)
         if result.status_code in {401, 403}:
-            raise MailError("authentication")
+            raise MailError(
+                "authentication", stage="mailbox", http_status=result.status_code
+            )
         if result.status_code not in {200, 204}:
             raise MailError("protocol")
         return result

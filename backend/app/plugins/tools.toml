@@ -5,7 +5,7 @@ id = "mailcom"
 name = "mail.com"
 backend = "mailcom"
 template = "six_digit_code"
-revision = 1
+revision = 2
 
 [tools.options]
 sender = { env = "MAIL_CODE_SENDER" }
@@ -16,7 +16,7 @@ id = "gmxcom"
 name = "gmx.com"
 backend = "gmxcom"
 template = "six_digit_code"
-revision = 1
+revision = 2
 
 [tools.options]
 sender = { env = "MAIL_CODE_SENDER" }
@@ -27,7 +27,7 @@ id = "outlook"
 name = "Outlook 登录验证码"
 backend = "outlook"
 template = "six_digit_code"
-revision = 1
+revision = 2
 
 [tools.options]
 sender = { env = "OUTLOOK_CODE_SENDER" }
@@ -38,7 +38,7 @@ id = "outlook_manual"
 name = "Outlook manual"
 backend = "outlook_manual"
 template = "six_digit_code"
-revision = 1
+revision = 2
 
 [tools.options]
 sender = { env = "OUTLOOK_CODE_SENDER" }

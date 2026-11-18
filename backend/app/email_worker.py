@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 import inspect
+import logging
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -13,6 +14,8 @@ from .models import Account, EmailCodeRun, MailOAuthCredential, now
 from .mail import MailError, OAuthCredential, find_candidate, valid_code
 from .plugins import get_mail_tool
 from . import verification as v
+
+log = logging.getLogger("account-manager.email")
 
 
 def lease_next():
@@ -81,7 +84,9 @@ def snapshot(run_id, token):
                 .decrypt(credential.client_id_encrypted.encode())
                 .decode(),
                 client_secret=(
-                    cipher().decrypt(credential.client_secret_encrypted.encode()).decode()
+                    cipher()
+                    .decrypt(credential.client_secret_encrypted.encode())
+                    .decode()
                     if credential.client_secret_encrypted
                     else None
                 ),
@@ -169,9 +174,7 @@ def mark_oauth_reauthorize(data):
     expected_version = data.get("oauth_version", oauth.version)
     with Session.begin() as db:
         write_lock(db)
-        credential = db.get(
-            MailOAuthCredential, (data["account_id"], oauth.backend_id)
-        )
+        credential = db.get(MailOAuthCredential, (data["account_id"], oauth.backend_id))
         if credential and credential.version == expected_version:
             credential.status = "reauthorize_required"
             credential.version += 1
@@ -197,9 +200,9 @@ def persist_rotated_refresh(data, replacement):
             # A changed version means an administrator reauthorized/revoked
             # the account while this worker was in flight. Never overwrite it.
             if credential and credential.version == expected_version:
-                credential.refresh_token_encrypted = cipher().encrypt(
-                    replacement.encode()
-                ).decode()
+                credential.refresh_token_encrypted = (
+                    cipher().encrypt(replacement.encode()).decode()
+                )
                 credential.version += 1
                 credential.updated_at = now()
                 data["oauth_version"] = credential.version
@@ -310,6 +313,14 @@ class EmailWorker:
                 client.rotated_refresh_token = None
             complete(run_id, token, found=True)
         except MailError as exc:
+            if exc.code in {"authentication", "login_restricted"}:
+                log.warning(
+                    "Mailbox authentication failed: run=%s stage=%s http_status=%s code=%s",
+                    run_id,
+                    exc.stage or "unknown",
+                    exc.http_status or "unknown",
+                    exc.code,
+                )
             if exc.code == "authentication":
                 mark_oauth_reauthorize(data)
             if data is not None:

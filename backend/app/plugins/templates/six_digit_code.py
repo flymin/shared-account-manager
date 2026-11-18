@@ -4,9 +4,30 @@ import re
 from dataclasses import dataclass
 from email import policy
 from email.parser import BytesParser
-from email.utils import parseaddr
+from email.utils import getaddresses
 
 from ..common.html import HTML, visible_text
+
+
+DNS_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+
+
+def sender_pattern(sender):
+    if len(sender) > 254 or not re.fullmatch(r"[^@\s<>;,]+@[^@\s<>;,]+", sender):
+        return None
+    if "*" in sender:
+        local, domain = sender.rsplit("@", 1)
+        labels = domain.split(".")
+        if (
+            "*" in local
+            or sender.count("*") != 1
+            or len(labels) < 3
+            or not labels[0].endswith("*")
+            or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,61}", labels[0][:-1])
+            or any(not DNS_LABEL.fullmatch(label) for label in labels[1:])
+        ):
+            return None
+    return re.compile(re.escape(sender).replace(r"\*", "[a-z0-9-]*"))
 
 
 @dataclass(frozen=True)
@@ -23,8 +44,7 @@ class SixDigitCodeTemplate:
         sender = options["sender"].strip().casefold()
         subject = options["subject_keyword"].strip().casefold()
         if (
-            not re.fullmatch(r"[^@\s<>;,]+@[^@\s<>;,]+", sender)
-            or len(sender) > 254
+            sender_pattern(sender) is None
             or not subject
             or len(subject) > 200
             or any(char in subject for char in "\r\n")
@@ -33,13 +53,26 @@ class SixDigitCodeTemplate:
         return cls(sender, subject)
 
     def matches(self, sender, subject):
-        return (
-            parseaddr(str(sender or ""))[1].casefold() == self.sender
-            and self.subject_keyword in str(subject or "").casefold()
-        )
+        addresses = getaddresses([str(sender or "")])
+        if len(addresses) != 1:
+            return False
+        address = addresses[0][1].casefold()
+        pattern = sender_pattern(self.sender)
+        if pattern is None or len(address) > 254 or not pattern.fullmatch(address):
+            return False
+        if "*" in self.sender:
+            domain = address.rsplit("@", 1)[-1]
+            if any(not DNS_LABEL.fullmatch(label) for label in domain.split(".")):
+                return False
+        return self.subject_keyword in str(subject or "").casefold()
 
     def extract_code(self, raw):
         message = BytesParser(policy=policy.default).parsebytes(raw)
+        if (
+            len(message.get_all("From", [])) != 1
+            or len(message.get_all("Subject", [])) != 1
+        ):
+            return None
         if not self.matches(message.get("From", ""), message.get("Subject", "")):
             return None
         codes = set()

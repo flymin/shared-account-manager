@@ -9,9 +9,22 @@ from typing import Protocol
 class MailError(Exception):
     """Only a public error key crosses this boundary; never provider responses."""
 
-    def __init__(self, code: str, retryable: bool = False):
+    def __init__(
+        self, code: str, retryable: bool = False, *, stage=None, http_status=None
+    ):
         super().__init__(code)
         self.code, self.retryable = code, retryable
+        # Only fixed stages and integer status codes may reach diagnostic logs.
+        self.stage = (
+            stage
+            if type(stage) is str and stage in {"login", "token", "mailbox"}
+            else None
+        )
+        self.http_status = (
+            http_status
+            if type(http_status) is int and 100 <= http_status <= 599
+            else None
+        )
 
 
 @dataclass(frozen=True)

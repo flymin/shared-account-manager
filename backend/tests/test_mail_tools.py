@@ -199,7 +199,11 @@ def test_reconfigured_tool_cancels_old_candidates_and_results(
             db.get(EmailCodeRun, identity).status = "found"
     base = f"/api/v1/accounts/{account['id']}"
     previous = admin.get(base + "/verification").json()["email_tool_revision"]
+    previous_revision = next(
+        t.revision for t in tool_catalog().tools if t.id == "mailcom"
+    )
     definition = register_tool("mailcom")
+    definition.revision = previous_revision
     if change == "options":
         definition.options = {
             "sender": "changed@example.test",

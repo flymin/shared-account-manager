@@ -3,6 +3,7 @@ from email.message import EmailMessage
 import pytest
 
 from app.plugins import get_mail_tool
+from app.plugins.templates.six_digit_code import SixDigitCodeTemplate
 
 
 def extract_code(raw):
@@ -106,3 +107,103 @@ def test_attached_mail_and_multipart_subtrees_are_not_body_codes(outer_code):
     assert extract_code(outer.as_bytes()) == outer_code
     outer.get_payload()[-1].replace_header("Content-Disposition", "inline")
     assert extract_code(outer.as_bytes()) == outer_code
+
+
+@pytest.mark.parametrize(
+    "sender",
+    [
+        "noreply@notify.example.test",
+        "noreply@notify1.example.test",
+        "Notifier <NOREPLY@NOTIFY42.EXAMPLE.TEST>",
+        "noreply@notify-east.example.test",
+    ],
+)
+def test_sender_label_wildcard_matches_metadata_and_raw_headers(sender):
+    template = SixDigitCodeTemplate.from_config(
+        {"sender": "noreply@notify*.example.test", "subject_keyword": "ExampleService"}
+    )
+    assert template is not None
+    message = EmailMessage()
+    message["From"] = sender
+    message["Subject"] = "Your ExampleService login code"
+    message.set_content("Temporary code: 123456")
+    assert template.matches(sender, str(message["Subject"]))
+    assert template.extract_code(message.as_bytes()) == "123456"
+
+
+@pytest.mark.parametrize(
+    "sender",
+    [
+        "noreply@example.test",
+        "noreply@other.example.test",
+        "noreply@evilnotify1.example.test",
+        "noreply@notify1.example.test.attacker.test",
+        "noreply@notify1.examplextest",
+        "noreply@child.notify1.example.test",
+        "noreply@notify1.attacker.example.test",
+        "other@notify1.example.test",
+        "noreply+tag@notify1.example.test",
+        "noreply@notify-.example.test",
+        "noreply@notify1.example.test.",
+        "noreply@notify１.example.test",
+        "noreply@notify" + "1" * 64 + ".example.test",
+        "noreply@notify1.example.test, attacker@elsewhere.example.test",
+    ],
+)
+def test_sender_wildcard_rejects_sibling_domains_and_ambiguous_addresses(sender):
+    template = SixDigitCodeTemplate.from_config(
+        {"sender": "noreply@notify*.example.test", "subject_keyword": "ExampleService"}
+    )
+    message = EmailMessage()
+    message["From"] = sender
+    message["Subject"] = "ExampleService login code"
+    message.set_content("123456")
+    assert not template.matches(sender, str(message["Subject"]))
+    assert template.extract_code(message.as_bytes()) is None
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        "*@notify.example.test",
+        "noreply@*.example.test",
+        "noreply@notify*example.test",
+        "noreply@notify*.test",
+        "noreply@notify*.*.test",
+        "noreply@no*tify.example.test",
+        "noreply@notify**.example.test",
+        "noreply@-notify*.example.test",
+        "noreply@notify*.example.test,other@example.test",
+    ],
+)
+def test_wildcard_configuration_cannot_expand_beyond_one_prefixed_label(rule):
+    assert (
+        SixDigitCodeTemplate.from_config(
+            {"sender": rule, "subject_keyword": "ExampleService"}
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("tool", ["mailcom", "gmxcom", "outlook", "outlook_manual"])
+def test_every_registered_mailbox_tool_uses_the_same_sender_rule(tool, monkeypatch):
+    for prefix in ("MAIL", "OUTLOOK"):
+        monkeypatch.setenv(prefix + "_CODE_SENDER", "noreply@notify*.example.test")
+        monkeypatch.setenv(prefix + "_CODE_SUBJECT_KEYWORD", "ExampleService")
+    monkeypatch.setenv("OUTLOOK_MANUAL_CLIENT_ID", "fictional-public-client")
+    configured = get_mail_tool(tool)
+    assert configured is not None and configured.template is not None
+    assert configured.template.matches("noreply@notify7.example.test", "ExampleService")
+    assert not configured.template.matches(
+        "attacker@notify7.example.test", "ExampleService"
+    )
+
+
+@pytest.mark.parametrize("header", ["From", "Subject"])
+def test_duplicate_matching_headers_are_not_accepted(header):
+    message = EmailMessage()
+    message["From"] = "noreply@login.example.test"
+    message["Subject"] = "ExampleService"
+    message.set_content("123456")
+    raw = f"{header}: unrelated@example.test\r\n".encode() + message.as_bytes()
+    assert extract_code(raw) is None

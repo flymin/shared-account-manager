@@ -71,7 +71,9 @@ class ProviderFixture:
                     "navigator": {
                         "apps": {
                             "mail": {
-                                "url_map": {"default": f"https://webmailer.{self.domain}/"}
+                                "url_map": {
+                                    "default": f"https://webmailer.{self.domain}/"
+                                }
                             }
                         }
                     }
@@ -378,6 +380,91 @@ def test_http_client_logs_do_not_expose_session_urls(caplog):
     client.close()
     assert "fictional-private-session-token" not in caplog.text
     assert "HTTP Request" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "stage,status", [("login", 200), ("token", 403), ("mailbox", 401)]
+)
+def test_authentication_errors_identify_only_safe_stage(stage, status):
+    stamp = datetime.now(timezone.utc)
+    provider = ProviderFixture(stamp, domain="gmx.com")
+
+    def respond(req):
+        if stage == "login" and req.url.host == "login.gmx.com":
+            return httpx.Response(status, text="Sign in rejected")
+        if stage == "token" and req.url.path == "/token":
+            return httpx.Response(status)
+        if stage == "mailbox" and req.url.path == "/Mailbox/Mail":
+            return httpx.Response(status)
+        return provider(req)
+
+    client = GMXComClient(
+        "fixture@example.test",
+        "fictional-mailbox-password",
+        transport=httpx.MockTransport(respond),
+    )
+    try:
+        with pytest.raises(MailError) as caught:
+            list(
+                client.iter_unread(
+                    stamp - timedelta(minutes=1), stamp + timedelta(minutes=1)
+                )
+            )
+        assert caught.value.code == "authentication"
+        assert caught.value.stage == stage and caught.value.http_status == status
+        assert str(caught.value) == "authentication" and not caught.value.retryable
+    finally:
+        client.close()
+
+
+def test_error_diagnostics_reject_untrusted_metadata():
+    error = MailError(
+        "authentication",
+        stage="fictional-sensitive-value",
+        http_status="Bearer fictional-token",
+    )
+    assert error.stage is None and error.http_status is None
+    error = MailError("authentication", stage=["login"], http_status=True)
+    assert error.stage is None and error.http_status is None
+
+
+@pytest.mark.parametrize(
+    "client_type,domain", [(MailComClient, "mail.com"), (GMXComClient, "gmx.com")]
+)
+def test_login_help_redirect_is_distinct_from_bad_credentials(client_type, domain):
+    stamp = datetime.now(timezone.utc)
+    fixture = ProviderFixture(stamp, domain=domain)
+
+    def respond(request):
+        if request.url.host == "login." + domain:
+            return httpx.Response(
+                303,
+                headers={
+                    "Location": "https://support." + domain + "/account/login/info"
+                },
+            )
+        if request.url.host == "support." + domain:
+            assert request.method == "GET" and not request.content
+            return httpx.Response(
+                200, text="Login help. Authentication app instructions."
+            )
+        return fixture(request)
+
+    client = client_type(
+        "fixture@example.test", "fictional", transport=httpx.MockTransport(respond)
+    )
+    try:
+        with pytest.raises(MailError) as caught:
+            list(
+                client.iter_unread(
+                    stamp - timedelta(minutes=1), stamp + timedelta(minutes=1)
+                )
+            )
+        assert caught.value.code == "login_restricted"
+        assert caught.value.stage == "login" and caught.value.http_status == 200
+        assert not caught.value.retryable and not fixture.tokens
+    finally:
+        client.close()
 
 
 def test_budget_exhaustion_during_body_read_is_retryable(monkeypatch):
