@@ -131,6 +131,66 @@ def test_sender_label_wildcard_matches_metadata_and_raw_headers(sender):
     assert template.extract_code(message.as_bytes()) == "123456"
 
 
+@pytest.mark.parametrize("rule", ["*@notify*.example.test", "*@notify1.example.test"])
+@pytest.mark.parametrize(
+    "sender",
+    [
+        "otp@notify1.example.test",
+        "noreply@notify1.example.test",
+        "Notifier <LOGIN@NOTIFY1.EXAMPLE.TEST>",
+        "login+code@notify1.example.test",
+        "first.last@notify1.example.test",
+    ],
+)
+def test_whole_mailbox_wildcard_matches_metadata_and_raw_headers(rule, sender):
+    template = SixDigitCodeTemplate.from_config(
+        {"sender": rule, "subject_keyword": "ExampleService"}
+    )
+    assert template is not None
+    assert template.matches(sender, "ExampleService login code")
+    assert template.extract_code(mail(sender=sender)) == "123456"
+    assert (
+        template.extract_code(mail(sender=sender, subject="Unrelated service")) is None
+    )
+    assert template.extract_code(mail(code="123456\n654321", sender=sender)) is None
+    assert (
+        template.extract_code(mail(code="No code in this message", sender=sender))
+        is None
+    )
+
+
+def test_mailbox_and_domain_wildcards_allow_an_empty_domain_suffix():
+    template = SixDigitCodeTemplate.from_config(
+        {"sender": "*@notify*.example.test", "subject_keyword": "ExampleService"}
+    )
+    assert template.matches("otp@notify.example.test", "ExampleService")
+    assert template.extract_code(mail(sender="otp@notify.example.test")) == "123456"
+
+
+@pytest.mark.parametrize(
+    "sender",
+    [
+        "@notify1.example.test",
+        ".login@notify1.example.test",
+        "login..code@notify1.example.test",
+        "a" * 65 + "@notify1.example.test",
+        "otp@notify-.example.test",
+        "otp@other.example.test",
+        "otp@child.notify1.example.test",
+        "otp@notify1.example.test.attacker.test",
+        "otp@notify1.examplextest",
+        "otp@notify1.attacker.example.test",
+        "otp@notify1.example.test, other@notify1.example.test",
+    ],
+)
+def test_mailbox_wildcard_keeps_sender_and_domain_boundaries(sender):
+    template = SixDigitCodeTemplate.from_config(
+        {"sender": "*@notify*.example.test", "subject_keyword": "ExampleService"}
+    )
+    assert not template.matches(sender, "ExampleService")
+    assert template.extract_code(mail(sender=sender)) is None
+
+
 @pytest.mark.parametrize(
     "sender",
     [
@@ -165,7 +225,13 @@ def test_sender_wildcard_rejects_sibling_domains_and_ambiguous_addresses(sender)
 @pytest.mark.parametrize(
     "rule",
     [
-        "*@notify.example.test",
+        "prefix*@notify.example.test",
+        "*suffix@notify*.example.test",
+        "**@notify*.example.test",
+        "*@*.example.test",
+        "*@notify*.*.test",
+        "*@localhost",
+        "*@-invalid.example.test",
         "noreply@*.example.test",
         "noreply@notify*example.test",
         "noreply@notify*.test",
@@ -186,16 +252,22 @@ def test_wildcard_configuration_cannot_expand_beyond_one_prefixed_label(rule):
 
 
 @pytest.mark.parametrize("tool", ["mailcom", "gmxcom", "outlook", "outlook_manual"])
-def test_every_registered_mailbox_tool_uses_the_same_sender_rule(tool, monkeypatch):
+@pytest.mark.parametrize("local", ["noreply", "*"])
+def test_every_registered_mailbox_tool_uses_the_same_sender_rule(
+    tool, local, monkeypatch
+):
     for prefix in ("MAIL", "OUTLOOK"):
-        monkeypatch.setenv(prefix + "_CODE_SENDER", "noreply@notify*.example.test")
+        monkeypatch.setenv(prefix + "_CODE_SENDER", local + "@notify*.example.test")
         monkeypatch.setenv(prefix + "_CODE_SUBJECT_KEYWORD", "ExampleService")
     monkeypatch.setenv("OUTLOOK_MANUAL_CLIENT_ID", "fictional-public-client")
     configured = get_mail_tool(tool)
     assert configured is not None and configured.template is not None
     assert configured.template.matches("noreply@notify7.example.test", "ExampleService")
+    assert configured.template.matches(
+        "otp@notify7.example.test", "ExampleService"
+    ) == (local == "*")
     assert not configured.template.matches(
-        "attacker@notify7.example.test", "ExampleService"
+        "otp@notify7.attacker.test", "ExampleService"
     )
 
 

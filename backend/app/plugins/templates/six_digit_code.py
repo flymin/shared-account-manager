@@ -10,24 +10,32 @@ from ..common.html import HTML, visible_text
 
 
 DNS_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+MAILBOX_LOCAL = r"[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*"
 
 
 def sender_pattern(sender):
     if len(sender) > 254 or not re.fullmatch(r"[^@\s<>;,]+@[^@\s<>;,]+", sender):
         return None
-    if "*" in sender:
-        local, domain = sender.rsplit("@", 1)
-        labels = domain.split(".")
+    local, domain = sender.rsplit("@", 1)
+    labels = domain.split(".")
+    if "*" in local and local != "*":
+        return None
+    if "*" in domain:
         if (
-            "*" in local
-            or sender.count("*") != 1
+            domain.count("*") != 1
             or len(labels) < 3
             or not labels[0].endswith("*")
             or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,61}", labels[0][:-1])
             or any(not DNS_LABEL.fullmatch(label) for label in labels[1:])
         ):
             return None
-    return re.compile(re.escape(sender).replace(r"\*", "[a-z0-9-]*"))
+    elif local == "*" and (
+        len(labels) < 2 or any(not DNS_LABEL.fullmatch(label) for label in labels)
+    ):
+        return None
+    local_pattern = MAILBOX_LOCAL if local == "*" else re.escape(local)
+    domain_pattern = re.escape(domain).replace(r"\*", "[a-z0-9-]*")
+    return re.compile(local_pattern + "@" + domain_pattern)
 
 
 @dataclass(frozen=True)
@@ -61,7 +69,9 @@ class SixDigitCodeTemplate:
         if pattern is None or len(address) > 254 or not pattern.fullmatch(address):
             return False
         if "*" in self.sender:
-            domain = address.rsplit("@", 1)[-1]
+            local, domain = address.rsplit("@", 1)
+            if self.sender.startswith("*@") and len(local) > 64:
+                return False
             if any(not DNS_LABEL.fullmatch(label) for label in domain.split(".")):
                 return False
         return self.subject_keyword in str(subject or "").casefold()
